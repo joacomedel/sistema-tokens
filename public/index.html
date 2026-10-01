@@ -3,9 +3,55 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>sistemaTokens</title>
+    <title>sistemaTokens — consumo de OpenCode</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div id="app">Cargando…</div>
+    <header>
+      <h1>sistemaTokens</h1>
+      <section id="quota" aria-label="Cuota del plan"></section>
+    </header>
+
+    <div id="controls">
+      <label>
+        Rango
+        <select id="range-select">
+          <option value="today">Hoy</option>
+          <option value="7d">Últimos 7 días</option>
+          <option value="30d" selected>Últimos 30 días</option>
+          <option value="month">Este mes</option>
+          <option value="all">Todo</option>
+        </select>
+      </label>
+      <label>
+        Métrica
+        <select id="metric-select">
+          <option value="effective" selected>Tokens efectivos</option>
+          <option value="cost">USD</option>
+          <option value="total">Tokens totales</option>
+          <option value="cacheRead">Cache read</option>
+        </select>
+      </label>
+      <label>
+        <input type="checkbox" id="subagent-toggle" />
+        Agrupar subagentes por padre
+      </label>
+      <button id="refresh" type="button" title="Actualizar">⟳</button>
+      <span id="legend">💸 modelo caro · 🚫 sin cache · 📤 output largo · 🧠 razonamiento alto · 🗜️ se compactó · 👥 muchos subagentes</span>
+    </div>
+
+    <nav id="breadcrumb"></nav>
+
+    <main>
+      <section id="level-1" class="level" aria-label="Proyectos"></section>
+      <section id="level-2" class="level hidden" aria-label="Sesiones"></section>
+      <section id="level-3" class="level hidden" aria-label="Mensajes"></section>
+    </main>
+
+    <aside id="drawer" class="hidden" aria-label="Detalle del mensaje"></aside>
+    <div id="toast" class="hidden" role="status"></div>
+
+    <script src="/app.js"></script>
   </body>
 </html>
