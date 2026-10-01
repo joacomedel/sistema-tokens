@@ -1,7 +1,7 @@
 # Sistema de visualización de consumo de tokens de OpenCode
 
 **Fecha:** 2026-10-01
-**Estado:** Diseño aprobado en conversación — pendiente de revisión del usuario sobre este documento
+**Estado:** Aprobada por el usuario el 2026-10-01 (aprobación en conversación; este documento es la referencia)
 **Proyecto:** `sistemaTokens` (app web local, un solo usuario)
 
 ---
