@@ -90,7 +90,7 @@ sistemaTokens/
 - **Niveles 1 y 2** usan las columnas agregadas de `session_v2` (cobertura completa, incluso con mensajes podados). El rango temporal se aplica por solapamiento: sesiones con `time_created <= to` y `time_updated >= from`.
 - **Nivel 1 — Proyectos:** `GROUP BY project_id`; label = `name ?? basename(worktree)`; worktree `/` → "Global".
 - **Nivel 2 — Sesiones:** `GROUP BY session_id` dentro del proyecto; incluye subagentes con su `parent_id`, `title`, `model`, `time_compacting`.
-- **Nivel 3 — Mensajes:** mensajes assistant de la sesión desde su fuente correspondiente (`message` si la sesión es histórica; `session_message` si es de v2), con modelo/variante, duración (`completed - created`) y conteo de tools por nombre. Si el total visible es menor al de `session_v2`, la UI lo avisa (poda de OpenCode).
+- **Nivel 3 — Mensajes:** mensajes assistant de la sesión desde su fuente correspondiente (`message` si la sesión es histórica; `session_message` si es de v2), con modelo/variante, duración y conteo de tools por nombre. Las barras se ordenan por la métrica elegida (descendente) y muestran el desglose (`in`/`out`/`🧠`/`cache`) en la propia barra; el `#N` conserva el orden cronológico como referencia. Si el total visible es menor al de `session_v2`, la UI lo avisa (poda de OpenCode).
 - **Detalle:** desglose completo del mensaje + tools agrupadas por nombre con conteo (sin contenido de los textos).
 - **Tokens efectivos = `input + output + reasoning`** (≈ `total − cache_read − cache_write`). Métrica de orden/color por defecto. El cache-read/write se muestra aparte para no distorsionar.
 - **USD:** el `cost` que OpenCode ya registró (modelos gratuitos = USD 0 legítimo; no se inventan precios).
@@ -157,7 +157,7 @@ sistemaTokens/
 - **Subagentes:** borde punteado + color secundario + toggle "agrupar por padre".
 - **Señales:** ícono + color por barra, tooltip explicativo, leyenda fija.
 - **Estados:** cargando (skeleton), vacío ("sin datos en este rango") y error, cada uno con mensaje claro.
-- **Drawer de mensaje:** timestamp, modelo/variante, agente, desglose de tokens, costo, duración, resumen de tools.
+- **Drawer de mensaje:** timestamp, modelo/variante, agente, desglose de tokens, costo, duración, resumen de tools y una sección **¿Por qué?** que explica el consumo (comparación con la mediana de la sesión, composición de tokens, uso de cache y señales).
 
 ## 10. Errores y degradación
 

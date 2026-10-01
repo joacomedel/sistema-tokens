@@ -316,6 +316,15 @@ main {
   font-size: 13px;
 }
 
+.why {
+  font-size: 13px;
+  margin: 6px 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 /* ---------- toast ---------- */
 #toast {
   position: fixed;

@@ -111,6 +111,7 @@ function renderBars(container, items, { onSelect } = {}) {
     row.className = 'bar-row';
     if (item.parentId) row.classList.add('subagent');
     if (item.indented) row.classList.add('indented');
+    if (item.title) row.title = item.title;
 
     const fill = document.createElement('span');
     fill.className = 'bar-fill';
@@ -269,6 +270,79 @@ async function loadMessages(sessionId) {
   renderBreadcrumb();
 }
 
+function messageNotes(m) {
+  const t = m.tokens;
+  const parts = [m.modelId ?? '—'];
+  parts.push(`in ${fmtTokens(t.input)}`);
+  parts.push(`out ${fmtTokens(t.output)}`);
+  if (t.reasoning > 0) parts.push(`🧠 ${fmtTokens(t.reasoning)}`);
+  if (t.cacheRead > 0 || t.cacheWrite > 0) parts.push(`cache ${fmtTokens(t.cacheRead + t.cacheWrite)}`);
+  parts.push(fmtDuration(m.durationMs));
+  if (m.agent) parts.push(m.agent);
+  return parts.join(' · ');
+}
+
+function messageTooltip(m) {
+  const t = m.tokens;
+  const lines = [
+    `input: ${intFmt.format(t.input)}`,
+    `output: ${intFmt.format(t.output)}`,
+    `reasoning: ${intFmt.format(t.reasoning)}`,
+    `cache read: ${intFmt.format(t.cacheRead)}`,
+    `cache write: ${intFmt.format(t.cacheWrite)}`,
+    `tokens efectivos: ${intFmt.format(t.effective)}`,
+    `costo: ${fmtUsd(t.cost)}`,
+  ];
+  if (m.flags.length) lines.push(`señales: ${m.flags.map((f) => f.label).join(', ')}`);
+  return lines.join('\n');
+}
+
+function median(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/** Explica el consumo de un mensaje en relación al resto de la sesión. */
+function whyLines(m, setItems) {
+  const t = m.tokens;
+  const lines = [];
+
+  const med = median(setItems.map((x) => x.tokens.effective));
+  if (med != null && med > 0) {
+    const ratio = t.effective / med;
+    lines.push(
+      ratio >= 1.5
+        ? `Gastó ${intFmt.format(t.effective)} tokens efectivos: ${ratio.toFixed(1)}× la mediana de la sesión (${intFmt.format(Math.round(med))}).`
+        : `Gastó ${intFmt.format(t.effective)} tokens efectivos, en línea con la mediana de la sesión.`,
+    );
+  }
+
+  const comp = [`input ${intFmt.format(t.input)}`, `output ${intFmt.format(t.output)}`];
+  if (t.reasoning > 0) comp.push(`razonamiento ${intFmt.format(t.reasoning)}`);
+  if (t.cacheRead > 0) comp.push(`cache read ${intFmt.format(t.cacheRead)} (barato)`);
+  lines.push(`Composición: ${comp.join(' · ')}.`);
+
+  if (t.cacheRead === 0 && t.input > 0) {
+    lines.push(`Sin cache: el contexto de entrada se pagó completo (${intFmt.format(t.input)} tokens).`);
+  } else if (t.cacheRead > 0) {
+    const share = Math.round((t.cacheRead / (t.cacheRead + t.input)) * 100);
+    lines.push(`Cache: ~${share}% del contexto entró por cache; el input nuevo fue ${intFmt.format(t.input)} tokens.`);
+  }
+
+  for (const f of m.flags) {
+    if (f.code === 'long_output') lines.push(`Output largo: la respuesta generó ${intFmt.format(t.output)} tokens.`);
+    if (f.code === 'high_reasoning') lines.push(`Razonamiento alto: ${intFmt.format(t.reasoning)} tokens pensando.`);
+    if (f.code === 'expensive_model' && t.effective > 0) {
+      lines.push(`Modelo caro: ${fmtUsd((t.cost / t.effective) * 1e6)} por millón de tokens efectivos.`);
+    }
+  }
+
+  if (m.durationMs != null) lines.push(`Tardó ${fmtDuration(m.durationMs)}.`);
+  return lines;
+}
+
 function renderMessages() {
   const body = state.data.messages;
   if (!body) return;
@@ -277,10 +351,12 @@ function renderMessages() {
     id: m.id,
     kind: 'message',
     name: `#${i + 1} · ${fmtTime(m.timeCreated)}`,
-    notes: `${m.modelId ?? '—'}${m.agent ? ` · ${m.agent}` : ''} · ${fmtDuration(m.durationMs)}`,
+    notes: messageNotes(m),
     value: m.tokens[state.metric],
     flags: m.flags,
+    title: messageTooltip(m),
   }));
+  items.sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
   renderBars(el, items, { onSelect: (item) => openDrawer(item.id) });
   const notes = [];
   if (body.partial && body.sessionTotals) {
@@ -306,6 +382,8 @@ async function openDrawer(messageId) {
   el.innerHTML = '<p class="state">Cargando…</p>';
   try {
     const d = await api(`/api/messages/${messageId}`);
+    const setItem = state.data.messages?.items.find((x) => x.id === messageId) ?? null;
+    const why = setItem ? whyLines(setItem, state.data.messages.items) : [];
     el.innerHTML = `
       <button id="drawer-close" type="button" aria-label="Cerrar">✕</button>
       <h3>Mensaje</h3>
@@ -332,11 +410,7 @@ async function openDrawer(messageId) {
           ? `<ul class="tools">${d.tools.map((t) => `<li>${escapeHtml(t.name)} <span>×${t.count}</span></li>`).join('')}</ul>`
           : '<p class="state">Sin tool calls.</p>'
       }
-      ${
-        d.flags.length
-          ? `<h4>Señales</h4><p class="flags-line">${d.flags.map((f) => `${FLAG_ICONS[f.code] ?? '⚠️'} ${escapeHtml(f.label)}`).join(' · ')}</p>`
-          : ''
-      }
+      ${why.length ? `<h4>¿Por qué?</h4><ul class="why">${why.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>` : ''}
     `;
     $('drawer-close').addEventListener('click', closeDrawer);
   } catch (err) {
