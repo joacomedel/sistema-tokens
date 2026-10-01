@@ -46,7 +46,7 @@ function sendError(res, status, code, message) {
   sendJson(res, status, { error: { code, message } });
 }
 
-export function createServer({ dbPath = null, config = {}, quotaFetcher = null } = {}) {
+export function createServer({ dbPath = null, config = {}, quotaFetcher = null, now = () => new Date() } = {}) {
   const resolvedDbPath = dbPath ?? config.dbPath ?? defaultDbPath();
   const ttlSeconds = config.quota?.ttlSeconds ?? 60;
   const manualLimits = config.quota?.manualLimits ?? null;
@@ -101,7 +101,7 @@ export function createServer({ dbPath = null, config = {}, quotaFetcher = null }
       sendError(res, 400, 'bad_request', `range inválido: ${key}`);
       return null;
     }
-    return resolveRange(key);
+    return resolveRange(key, now());
   }
 
   function withDb(res, fn) {
@@ -175,7 +175,13 @@ export function createServer({ dbPath = null, config = {}, quotaFetcher = null }
         annotateMessages(items);
         const totals = sumMetrics(items.map((i) => i.tokens));
         const sessionTotals = getSessionTotals(database, id);
-        const partial = Boolean(sessionTotals && totals.effective < sessionTotals.effective);
+        // Solo es "poda" si el rango cubre la vida completa de la sesión; si no,
+        // la diferencia se explica por el recorte del rango.
+        const coversSession =
+          sessionTotals != null &&
+          (range.fromMs == null || range.fromMs <= sessionTotals.timeCreated) &&
+          (range.toMs == null || range.toMs >= sessionTotals.timeUpdated);
+        const partial = Boolean(coversSession && totals.effective < sessionTotals.effective);
         sendJson(res, 200, { range: range.key, items, skipped, totals, sessionTotals, partial, source });
       });
     }

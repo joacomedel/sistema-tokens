@@ -192,6 +192,7 @@ function renderProjects() {
       ? [{ code: 'summary', label: `${p.flagsSummary.sessionsWithSignals} sesiones con señales` }]
       : [],
   }));
+  items.sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
   renderBars($('level-1'), items, { onSelect: (item) => openProject(item.id) });
 }
 
@@ -224,6 +225,7 @@ function sessionItems() {
     value: s.tokens[state.metric],
     flags: s.flags,
   }));
+  mapped.sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
   if (!state.groupByParent) return mapped;
 
   const roots = mapped.filter((m) => !m.parentId);

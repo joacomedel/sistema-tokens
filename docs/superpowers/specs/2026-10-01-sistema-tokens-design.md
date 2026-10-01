@@ -57,7 +57,7 @@ App web local y liviana que lee la base de datos de OpenCode (SQLite) y visualiz
 
 ## 4. Arquitectura
 
-**Stack:** Node 24 puro — `node:sqlite`, `node:http` y `fetch` nativos. Frontend HTML/CSS/JS vanilla con **μPlot** (gráficos, ~45 KB) servido local. **Cero dependencias npm, cero build step, cero CDN.**
+**Stack:** Node 24 puro — `node:sqlite`, `node:http` y `fetch` nativos. Frontend HTML/CSS/JS vanilla con barras horizontales CSS (sin librería de gráficos). **Cero dependencias npm, cero build step, cero CDN.**
 
 ```
 sistemaTokens/
@@ -71,8 +71,7 @@ sistemaTokens/
 ├── public/
 │   ├── index.html
 │   ├── app.js             # estado, fetch, render de barras, drill-down, drawer
-│   ├── styles.css
-│   └── vendor/            # uPlot.iife.min.js + uPlot.min.css (descargados una vez)
+│   └── styles.css
 ├── config.json            # puerto, dbPath, límites manuales de cuota, TTL de caché
 ├── tests/                 # tests con node:test + BD fixture
 ├── scripts/verify.mjs     # verificación cruzada contra la BD real (readonly)
@@ -181,7 +180,7 @@ sistemaTokens/
 1. Drill-down completo en 3 niveles por click, con breadcrumb y `Esc`.
 2. Señales y outliers visibles y correctos según los umbrales definidos.
 3. Panel de cuota mostrando datos oficiales o fallback local claramente etiquetado.
-4. Los tres niveles cuadran entre sí para cualquier rango.
+4. Niveles 1-2 cuadran entre sí (misma fuente `session_v2`); el nivel 3 cuadra exacto en sesiones v1 y puede ser parcial por poda en v2, siempre avisado en la UI.
 5. La BD de OpenCode no se modifica: la app la abre en modo readonly y no ejecuta ninguna sentencia de escritura (verificable por diseño y en revisión de código).
 6. Ninguna dependencia npm; arranca con `npm start` (o `node server.mjs`) y abre en `http://localhost:4747`.
 
@@ -198,7 +197,7 @@ sistemaTokens/
 ## 13. Decisiones de diseño (y alternativas descartadas)
 
 - **Node 24 puro (elegida)** vs. Vite+React (peso y build step innecesarios) vs. Python (dos lenguajes sin ganancia). Sin dependencias = no se rompe por versiones.
-- **μPlot** (45 KB, sin dependencias, muy rápido) vs. Chart.js/ECharts (más peso).
+- **Barras horizontales en CSS** (decidido durante la implementación; el plan preveía μPlot): mejor lectura para rankings con labels largos, flags y click directo, y refuerza el cero-dependencias. El render está aislado en `renderBars()` por si se migra.
 - **Sin `ccusage`:** sus adaptadores leen los JSON legacy; la v2 es SQLite y además necesitamos drill-down por mensaje con señales, que ninguna herramienta da.
 - **USD real de OpenCode**, sin tabla de precios propia (YAGNI hoy).
 - **Cuota por API con fallback manual**, porque el endpoint rechazó las credenciales locales en el spike pero puede habilitarse solo (reintentos automáticos ya previstos).

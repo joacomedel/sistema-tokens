@@ -12,10 +12,15 @@ function tmpDir() {
   return mkdtempSync(join(tmpdir(), 'sistema-tokens-quota-'));
 }
 
-function withCreds(filePath, { credential = null, account = null } = {}) {
+function withCreds(filePath, { credentials = [], account = null } = {}) {
   const raw = new DatabaseSync(filePath);
-  raw.exec('CREATE TABLE credential (id TEXT PRIMARY KEY, value TEXT); CREATE TABLE account (id TEXT PRIMARY KEY, access_token TEXT);');
-  if (credential) raw.prepare('INSERT INTO credential VALUES (?, ?)').run('c1', credential);
+  raw.exec(
+    'CREATE TABLE credential (id TEXT PRIMARY KEY, integration_id TEXT, value TEXT); CREATE TABLE account (id TEXT PRIMARY KEY, access_token TEXT);',
+  );
+  let i = 0;
+  for (const [integrationId, value] of credentials) {
+    raw.prepare('INSERT INTO credential VALUES (?, ?, ?)').run(`c${i++}`, integrationId, value);
+  }
   if (account) raw.prepare('INSERT INTO account VALUES (?, ?)').run('a1', account);
   raw.close();
 }
@@ -56,7 +61,7 @@ test('getQuota: 200 con token del provider → source api y caché', async () =>
   const dir = tmpDir();
   const path = join(dir, 'q.db');
   makeFixtureDb(path);
-  withCreds(path, { credential: 'sk-test-cred' });
+  withCreds(path, { credentials: [['opencode', 'sk-test-cred']] });
   const db = openDb(path);
 
   let calls = 0;
@@ -86,11 +91,36 @@ test('getQuota: 200 con token del provider → source api y caché', async () =>
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('getQuota: usa la credencial del provider opencode y no otra', async () => {
+  const dir = tmpDir();
+  const path = join(dir, 'q.db');
+  makeFixtureDb(path);
+  withCreds(path, {
+    credentials: [
+      ['anthropic', 'sk-otro-provider'],
+      ['opencode', 'sk-opencode'],
+    ],
+  });
+  const db = openDb(path);
+
+  const seen = [];
+  const fakeFetch = async (url, opts) => {
+    seen.push(opts.headers.Authorization);
+    return ok('{"usage":{"rolling":{"percent":1}}}');
+  };
+  const r = await getQuota({ db, fetchImpl: fakeFetch, now: new Date(2026, 9, 1, 12), cache: null });
+  assert.equal(r.source, 'api');
+  assert.deepEqual(seen, ['Bearer sk-opencode'], 'no debe filtrar la key de otro provider');
+
+  db.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('getQuota: credential 401 y account 200 → usa la segunda', async () => {
   const dir = tmpDir();
   const path = join(dir, 'q.db');
   makeFixtureDb(path);
-  withCreds(path, { credential: 'sk-bad', account: 'oauth-good' });
+  withCreds(path, { credentials: [['opencode', 'sk-bad']], account: 'oauth-good' });
   const db = openDb(path);
 
   const seen = [];
@@ -112,7 +142,7 @@ test('getQuota: ambas credenciales 401 → local con causa', async () => {
   const dir = tmpDir();
   const path = join(dir, 'q.db');
   makeFixtureDb(path);
-  withCreds(path, { credential: 'sk-bad', account: 'oauth-bad' });
+  withCreds(path, { credentials: [['opencode', 'sk-bad']], account: 'oauth-bad' });
   const db = openDb(path);
 
   const r = await getQuota({ db, fetchImpl: async () => err(401), now: new Date(2026, 9, 1, 23), cache: null });
@@ -129,7 +159,7 @@ test('getQuota: red caída → local con error legible', async () => {
   const dir = tmpDir();
   const path = join(dir, 'q.db');
   makeFixtureDb(path);
-  withCreds(path, { credential: 'sk-test' });
+  withCreds(path, { credentials: [['opencode', 'sk-test']] });
   const db = openDb(path);
 
   const r = await getQuota({
@@ -151,7 +181,7 @@ test('getQuota: 200 sin ventanas parseables → local (no inventa datos)', async
   const dir = tmpDir();
   const path = join(dir, 'q.db');
   makeFixtureDb(path);
-  withCreds(path, { credential: 'sk-test' });
+  withCreds(path, { credentials: [['opencode', 'sk-test']] });
   const db = openDb(path);
 
   const r = await getQuota({ db, fetchImpl: async () => ok('{}'), now: new Date(2026, 9, 1, 12), cache: null });
@@ -193,7 +223,7 @@ test('localWindows cuenta el costo de sesiones v2 podadas (vía session_v2)', ()
   const db = openDb(path);
 
   const w = localWindows(db, { now: new Date(2026, 9, 1, 23, 0) });
-  assert.equal(w.find((x) => x.id === 'monthly').usedUsd, 0.085, '0.035 (s1-s3) + 0.05 (s4)');
+  assert.equal(w.find((x) => x.id === 'monthly').usedUsd, 0.105, '0.035 (s1-s3) + 0.05 (s4) + 0.02 (s5)');
   assert.equal(w.find((x) => x.id === 'rolling').usedUsd, 0);
 
   db.close();

@@ -129,7 +129,7 @@ test('cobertura parcial: sesión v2 podada reporta partial y sessionTotals', asy
   const v2Path = join(dir, 'v2.db');
   makeFixtureDb(v2Path);
   addSessionMessageFixtures(v2Path);
-  const s4srv = createServer({ dbPath: v2Path, quotaFetcher: fakeQuota });
+  const s4srv = createServer({ dbPath: v2Path, quotaFetcher: fakeQuota, now: () => new Date(2026, 9, 1, 16, 0) });
   await new Promise((resolve) => s4srv.server.listen(0, '127.0.0.1', resolve));
   try {
     const b = `http://127.0.0.1:${s4srv.server.address().port}`;
@@ -148,6 +148,16 @@ test('cobertura parcial: sesión v2 podada reporta partial y sessionTotals', asy
     assert.equal(fullBody.partial, false);
     assert.equal(fullBody.source, 'message');
     assert.equal(fullBody.sessionTotals.effective, 380);
+
+    // s5 cruzó la medianoche: con `today` el recorte es del rango, no poda.
+    const today = await fetch(`${b}/api/sessions/s5/messages?range=today`);
+    const todayBody = await today.json();
+    assert.equal(todayBody.partial, false, 'rango que no cubre la vida completa: no es poda');
+
+    // Con `7d` (cubre la vida completa) la diferencia sí es poda.
+    const week = await fetch(`${b}/api/sessions/s5/messages?range=7d`);
+    const weekBody = await week.json();
+    assert.equal(weekBody.partial, true, 'rango completo + visible < total = poda');
   } finally {
     await s4srv.close();
   }

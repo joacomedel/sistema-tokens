@@ -123,5 +123,28 @@ export function addSessionMessageFixtures(filePath) {
     JSON.stringify({ type: 'tool', tool: 'read', callID: 'cv1', state: { status: 'completed' } }),
   );
 
+  // s5: vida cruzando la medianoche (30-sep 22:00 → 1-oct 01:00) y podada.
+  // Sirve para distinguir "poda" de "recorte por rango".
+  db.prepare(
+    `INSERT INTO session_v2
+       (id, project_id, parent_id, title, directory, model, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, time_created, time_updated)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  ).run('s5', 'p2', null, 'Cruzó medianoche', '/', JSON.stringify({ id: 'model-c', providerID: 'prov-c' }), 0.02, 50, 0, 0, 0, 0, t(2026, 8, 30, 22), t(2026, 9, 1, 1));
+  sm.run(
+    'smv4',
+    's5',
+    'assistant',
+    0,
+    t(2026, 8, 30, 22, 10),
+    t(2026, 8, 30, 22, 10),
+    JSON.stringify({
+      agent: 'build',
+      model: { providerID: 'prov-c', id: 'model-c' },
+      cost: 0.01,
+      time: { created: t(2026, 8, 30, 22, 10), completed: t(2026, 8, 30, 22, 10) },
+      tokens: { input: 10, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    }),
+  );
+
   db.close();
 }

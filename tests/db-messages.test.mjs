@@ -108,5 +108,7 @@ test('getSessionTotals devuelve los agregados autoritativos', () => {
   const t1 = getSessionTotals(db, ids.s1);
   assert.equal(t1.effective, 380);
   assert.equal(t1.cost, 0.03);
+  assert.equal(t1.timeCreated, new Date(2026, 9, 1, 10).getTime());
+  assert.equal(t1.timeUpdated, new Date(2026, 9, 1, 12).getTime());
   assert.equal(getSessionTotals(db, 'nope'), null);
 });
