@@ -61,3 +61,67 @@ export function makeFixtureDb(filePath) {
   db.close();
   return { p1: 'p1', p2: 'p2', s1: 's1', s2: 's2', s3: 's3', m1: 'm1', m2: 'm2', m3: 'm3', m4: 'm4' };
 }
+
+/**
+ * Sesión "v2-only" (sin filas en `message`): sus mensajes viven en
+ * `session_message` con el shape de OpenCode v2, parcialmente podados.
+ *   - s4 (p2): session_v2 total = 110 efectivos / cost 0.05
+ *   - sesión visible: 65 + 23 = 88 efectivos (poda simulada)
+ */
+export function addSessionMessageFixtures(filePath) {
+  const db = new DatabaseSync(filePath);
+  db.exec(
+    'CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, seq INTEGER NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)',
+  );
+
+  const T5 = t(2026, 9, 1, 15);
+  db.prepare(
+    `INSERT INTO session_v2
+       (id, project_id, parent_id, title, directory, model, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, time_created, time_updated)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  ).run('s4', 'p2', null, 'V2 only', '/', JSON.stringify({ id: 'model-c', providerID: 'prov-c', variant: 'default' }), 0.05, 100, 10, 0, 0, 0, T5, T5 + 1800000);
+
+  const sm = db.prepare('INSERT INTO session_message VALUES (?,?,?,?,?,?,?)');
+  sm.run(
+    'smv1',
+    's4',
+    'assistant',
+    0,
+    T5,
+    T5,
+    JSON.stringify({
+      agent: 'build',
+      model: { providerID: 'prov-c', id: 'model-c', variant: 'default' },
+      cost: 0.04,
+      time: { created: T5, completed: T5 + 10000 },
+      tokens: { input: 60, output: 5, reasoning: 0, cache: { read: 0, write: 0 } },
+    }),
+  );
+  sm.run('smv2', 's4', 'user', 1, T5 + 1000, T5 + 1000, JSON.stringify({ text: 'hola', time: { created: T5 + 1000 } }));
+  sm.run(
+    'smv3',
+    's4',
+    'assistant',
+    2,
+    T5 + 2000,
+    T5 + 2000,
+    JSON.stringify({
+      agent: 'build',
+      model: { providerID: 'prov-c', id: 'model-c' },
+      cost: 0.01,
+      time: { created: T5 + 2000, completed: T5 + 3000 },
+      tokens: { input: 20, output: 3, reasoning: 0, cache: { read: 0, write: 0 } },
+    }),
+  );
+
+  db.prepare('INSERT INTO part VALUES (?,?,?,?,?,?)').run(
+    'pv1',
+    'smv1',
+    's4',
+    T5,
+    T5,
+    JSON.stringify({ type: 'tool', tool: 'read', callID: 'cv1', state: { status: 'completed' } }),
+  );
+
+  db.close();
+}

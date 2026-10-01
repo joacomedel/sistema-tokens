@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { makeFixtureDb } from './helpers/fixture.mjs';
+import { makeFixtureDb, addSessionMessageFixtures } from './helpers/fixture.mjs';
 import { createServer } from '../server.mjs';
 
 const fakeQuota = async () => ({ source: 'fake', error: null, fetchedAt: 123, windows: [] });
@@ -108,18 +108,49 @@ test('rango sin datos → items vacíos y totales en 0', async () => {
   const emptyPath = join(dir, 'empty.db');
   makeFixtureDb(emptyPath);
   const raw = new DatabaseSync(emptyPath);
-  raw.exec('DELETE FROM message');
+  raw.exec('DELETE FROM message; DELETE FROM session_v2;');
   raw.close();
 
   const s2 = createServer({ dbPath: emptyPath, quotaFetcher: fakeQuota });
   await new Promise((resolve) => s2.server.listen(0, '127.0.0.1', resolve));
-  const b2 = `http://127.0.0.1:${s2.server.address().port}`;
-  const res = await fetch(`${b2}/api/projects?range=today`);
-  assert.equal(res.status, 200);
-  const body = await res.json();
-  assert.deepEqual(body.items, []);
-  assert.equal(body.totals.effective, 0);
-  await s2.close();
+  try {
+    const b2 = `http://127.0.0.1:${s2.server.address().port}`;
+    const res = await fetch(`${b2}/api/projects?range=today`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.deepEqual(body.items, []);
+    assert.equal(body.totals.effective, 0);
+  } finally {
+    await s2.close();
+  }
+});
+
+test('cobertura parcial: sesión v2 podada reporta partial y sessionTotals', async () => {
+  const v2Path = join(dir, 'v2.db');
+  makeFixtureDb(v2Path);
+  addSessionMessageFixtures(v2Path);
+  const s4srv = createServer({ dbPath: v2Path, quotaFetcher: fakeQuota });
+  await new Promise((resolve) => s4srv.server.listen(0, '127.0.0.1', resolve));
+  try {
+    const b = `http://127.0.0.1:${s4srv.server.address().port}`;
+
+    const res = await fetch(`${b}/api/sessions/s4/messages?range=all`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.items.length, 2);
+    assert.equal(body.partial, true);
+    assert.equal(body.source, 'session_message');
+    assert.equal(body.sessionTotals.effective, 110);
+    assert.equal(body.totals.effective, 88);
+
+    const full = await fetch(`${b}/api/sessions/s1/messages?range=all`);
+    const fullBody = await full.json();
+    assert.equal(fullBody.partial, false);
+    assert.equal(fullBody.source, 'message');
+    assert.equal(fullBody.sessionTotals.effective, 380);
+  } finally {
+    await s4srv.close();
+  }
 });
 
 test('BD inexistente: meta degrada, projects 500, quota no rompe; close() libera', async () => {

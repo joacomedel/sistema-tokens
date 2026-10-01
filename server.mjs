@@ -3,7 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { openDb, listProjects, listSessions, listMessages, getMessageDetail, childCounts } from './lib/db.mjs';
+import { openDb, listProjects, listSessions, listMessages, getMessageDetail, getSessionTotals, childCounts } from './lib/db.mjs';
 import { resolveRange, RANGES } from './lib/ranges.mjs';
 import { annotateMessages, annotateSessions } from './lib/causes.mjs';
 import { getQuota } from './lib/quota.mjs';
@@ -171,14 +171,12 @@ export function createServer({ dbPath = null, config = {}, quotaFetcher = null }
       const range = parseRange(url, res);
       if (!range) return;
       return withDb(res, (database) => {
-        const { items, skipped } = listMessages(database, id, range);
+        const { items, skipped, source } = listMessages(database, id, range);
         annotateMessages(items);
-        sendJson(res, 200, {
-          range: range.key,
-          items,
-          skipped,
-          totals: sumMetrics(items.map((i) => i.tokens)),
-        });
+        const totals = sumMetrics(items.map((i) => i.tokens));
+        const sessionTotals = getSessionTotals(database, id);
+        const partial = Boolean(sessionTotals && totals.effective < sessionTotals.effective);
+        sendJson(res, 200, { range: range.key, items, skipped, totals, sessionTotals, partial, source });
       });
     }
 

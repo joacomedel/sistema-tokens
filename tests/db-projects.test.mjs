@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { makeFixtureDb } from './helpers/fixture.mjs';
 import { openDb, listProjects, listSessions } from '../lib/db.mjs';
 
@@ -69,4 +70,23 @@ test('rango sin datos devuelve items vacíos y totales en 0', () => {
 
 test('openDb tira error claro si la BD no existe', () => {
   assert.throws(() => openDb(join(dir, 'no-existe.db')), /BD no encontrada/);
+});
+
+test('los agregados salen de session_v2 aunque los mensajes difieran', () => {
+  const dir2 = mkdtempSync(join(tmpdir(), 'sistema-tokens-'));
+  const path = join(dir2, 'fixture.db');
+  makeFixtureDb(path);
+  const raw = new DatabaseSync(path);
+  raw.exec("UPDATE session_v2 SET tokens_input = 400 WHERE id = 's1'");
+  raw.close();
+
+  const db2 = openDb(path);
+  try {
+    const { items } = listProjects(db2, range);
+    const p1 = items.find((i) => i.id === 'p1');
+    assert.equal(p1.metrics.effective, 545, 's1 480 (400+70+10) + s2 65');
+  } finally {
+    db2.close();
+    rmSync(dir2, { recursive: true, force: true });
+  }
 });

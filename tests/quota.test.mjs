@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { makeFixtureDb } from './helpers/fixture.mjs';
+import { makeFixtureDb, addSessionMessageFixtures } from './helpers/fixture.mjs';
 import { openDb } from '../lib/db.mjs';
 import { parseUsagePayload, getQuota, localWindows } from '../lib/quota.mjs';
 
@@ -180,6 +180,21 @@ test('localWindows: ventanas 5h/semana/mes con límites manuales', () => {
   const mid = new Date(2026, 9, 1, 14, 30);
   const w2 = localWindows(db, { now: mid });
   assert.equal(w2.find((x) => x.id === 'rolling').usedUsd, 0.035);
+
+  db.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('localWindows cuenta el costo de sesiones v2 podadas (vía session_v2)', () => {
+  const dir = tmpDir();
+  const path = join(dir, 'q.db');
+  makeFixtureDb(path);
+  addSessionMessageFixtures(path); // s4: cost 0.05, time_updated 2026-10-01 15:30
+  const db = openDb(path);
+
+  const w = localWindows(db, { now: new Date(2026, 9, 1, 23, 0) });
+  assert.equal(w.find((x) => x.id === 'monthly').usedUsd, 0.085, '0.035 (s1-s3) + 0.05 (s4)');
+  assert.equal(w.find((x) => x.id === 'rolling').usedUsd, 0);
 
   db.close();
   rmSync(dir, { recursive: true, force: true });

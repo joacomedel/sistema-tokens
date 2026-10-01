@@ -280,10 +280,19 @@ function renderMessages() {
     flags: m.flags,
   }));
   renderBars(el, items, { onSelect: (item) => openDrawer(item.id) });
+  const notes = [];
+  if (body.partial && body.sessionTotals) {
+    notes.push(
+      `Mostrando ${fmtTokens(body.totals.effective)} de ${fmtTokens(body.sessionTotals.effective)} tokens efectivos de la sesión: OpenCode poda los mensajes más viejos, y esos no se pueden desglosar.`,
+    );
+  }
   if (body.skipped > 0) {
+    notes.push(`${body.skipped} mensajes salteados (datos ilegibles o sin tokens)`);
+  }
+  for (const note of notes.reverse()) {
     const p = document.createElement('p');
     p.className = 'state';
-    p.textContent = `${body.skipped} mensajes salteados (datos ilegibles o sin tokens)`;
+    p.textContent = note;
     el.prepend(p);
   }
 }
