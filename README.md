@@ -38,7 +38,9 @@ queda guardado en `store/` (git-ignored) y es reconsultable con `recall`.
 
 1. Levantá `sistemaTokens` (`npm start` en `../sistemaTokens`) para que la API
    responda en `127.0.0.1:4747`.
-2. Registrá el MCP en tu `opencode.jsonc` (ver `examples/opencode.jsonc`) o con:
+2. Este repo ya trae un `opencode.jsonc` **de proyecto**: el MCP queda registrado
+   solo cuando abrís OpenCode en esta carpeta. Para usarlo en otro proyecto,
+   copiá ese bloque (`examples/opencode.jsonc`) o corré
    `opencode mcp add sistemaTokens -- node /home/jm/opencode/sistemaTokens-mcp/index.mjs`.
 3. El servidor habla por stdio; los logs van por stderr.
 
