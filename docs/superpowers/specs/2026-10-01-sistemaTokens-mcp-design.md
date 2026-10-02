@@ -5,7 +5,7 @@ MCP local para **analizar el gasto de tokens de OpenCode** reutilizando la API d
 optimizar*.
 
 Fecha: 2026-10-01
-Estado: borrador para revisión
+Estado: revisada — pendiente calibrar umbrales contra la BD real
 
 ## Problema
 
@@ -54,8 +54,10 @@ después sin volver a analizar todo.
 | Lenguaje | JavaScript ESM (Node ≥ 24, sin build step) |
 | Transporte | stdio (MCP local) |
 | Alcance de `top_sessions` | Sin `project`, recorre **todos** los proyectos |
+| Profundidad de `diagnose` | **Un nivel por llamada** + `next` para bajar |
 | Salidas | **Resumen** por defecto + **raw** a pedido |
 | Raw | Se **persiste** en el repo para reconsultar sin reanalizar |
+| Umbrales | **Calibrados contra la BD real** (read-only), versionados en el código |
 
 ## Arquitectura
 
@@ -164,7 +166,8 @@ Detalle del mensaje + desglose de tokens + tools + "¿por qué?" + disparador
 Fuente: `GET /api/messages/:id`.
 
 ### `diagnose(scope, id?, range?, raw?)`
-**El core.** Recorre el árbol y devuelve hallazgos con evidencia.
+**El core.** Diagnostica **un nivel** del árbol y devuelve hallazgos con
+evidencia más las posibilidades de bajar el nivel siguiente.
 
 - `scope`: `global | project | session | turn | message`.
 - Sin `id`, arranca en el nivel más caro del scope (`global` → proyecto top).
@@ -195,7 +198,7 @@ Devuelve:
 El `runId` queda en el store: se puede pedir el crudo completo con
 `recall(runId)` sin reanalizar.
 
-Reglas heurísticas (umbrales provisorios, a calibrar):
+Reglas heurísticas (umbrales provisorios, a calibrar contra la BD real):
 
 | Code | Disparador |
 |------|-----------|
@@ -233,6 +236,20 @@ Guardrails:
 - Agrega `LIMIT 500` si no hay `LIMIT`.
 - Timeout de ejecución.
 
+## Calibración de umbrales
+
+Los umbrales de las heurísticas se calibran contra la BD real de OpenCode
+(lectura `readOnly`), no a ojo. Método:
+
+- Para cada métrica relevante (input, `cacheRead`, output, reasoning, costo por
+  millón, tool calls por turno, subagentes por sesión, hit ratio de cache) se
+  calculan percentiles sobre las sesiones y mensajes del periodo.
+- Cada umbral de la tabla se fija en p75/p90 (o mediana, según la métrica).
+- Los valores resultantes se documentan y quedan como constantes versionadas en
+  `analyze/thresholds.mjs`, con un test que las valide.
+
+No requiere que `sistemaTokens` esté corriendo: se lee la BD directo.
+
 ## Testing (repo del MCP)
 
 - `client/api.mjs`: server HTTP falso (`node:http`) con fixtures de respuestas.
@@ -252,13 +269,8 @@ Guardrails:
 - No loguea credenciales ni tokens de cuota.
 - `query_db` restringido como se describe arriba.
 
-## Preguntas abiertas
-
-1. Umbrales exactos de las heurísticas (¿calibramos contra tu BD real?).
-2. ¿`diagnose` baja solo un nivel (recomienda el próximo `diagnose`) o recorre
-   todo el árbol en una sola llamada? (propuesto: un nivel + `next`).
-
 ## Próximo paso
 
-Revisar esta spec. Con el OK, se escribe el **plan de implementación** (writing-plans)
-y recién después se codea con TDD.
+Con la spec revisada: **calibrar umbrales** contra la BD real (read-only) y
+luego escribir el **plan de implementación** (writing-plans). Recién después se
+codea con TDD.
