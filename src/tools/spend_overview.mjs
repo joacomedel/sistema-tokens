@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { formatTokens, formatUsd } from '../analyze/format.mjs';
-import { RANGES, resolveRaw, toolResult } from './common.mjs';
+import { RANGES, resolveRaw, toolResult, loadApi } from './common.mjs';
 
 export function registerSpendOverview(server, deps) {
   server.registerTool(
@@ -18,7 +18,7 @@ export function registerSpendOverview(server, deps) {
         store: deps.store,
         tool: 'spend_overview',
         params: { range },
-        load: () => deps.api.get('/api/projects', { range }),
+        load: () => loadApi({ api: deps.api, path: '/api/projects', params: { range }, config: deps.config }),
       });
 
       const projects = [...(data.items ?? [])].sort((a, b) => (b.metrics?.cost ?? 0) - (a.metrics?.cost ?? 0)).slice(0, 10);

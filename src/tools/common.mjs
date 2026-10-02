@@ -18,3 +18,16 @@ export async function resolveRaw({ store, tool, params, load }) {
 export function toolResult({ text, structured = {} }) {
   return { content: [{ type: 'text', text }], structuredContent: structured };
 }
+
+/** Llama a la API y, si falla, lanza un error accionable (no un stacktrace crudo). */
+export async function loadApi({ api, path, params, config }) {
+  try {
+    return await api.get(path, params);
+  } catch (err) {
+    const where = config?.apiUrl ?? 'la API de sistemaTokens';
+    const reason = err?.status ? `HTTP ${err.status}` : 'no responde';
+    throw new Error(
+      `No se pudo consultar la API de sistemaTokens (${reason}) en ${path}. Levantá el server de sistemaTokens (npm start) o usá query_db contra la BD. URL: ${where}.`,
+    );
+  }
+}

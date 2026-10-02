@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { formatTokens, formatUsd } from '../analyze/format.mjs';
-import { RANGES, METRICS, resolveRaw, toolResult } from './common.mjs';
+import { RANGES, METRICS, resolveRaw, toolResult, loadApi } from './common.mjs';
 
 function metricOf(session, metric) {
   return session.tokens?.[metric] ?? 0;
@@ -26,11 +26,18 @@ export function registerTopSessions(server, deps) {
         tool: 'top_sessions',
         params: { range, project, metric, limit },
         load: async () => {
-          if (project) return deps.api.get(`/api/projects/${project}/sessions`, { range });
-          const projects = await deps.api.get('/api/projects', { range });
+          if (project) {
+            return loadApi({ api: deps.api, path: `/api/projects/${project}/sessions`, params: { range }, config: deps.config });
+          }
+          const projects = await loadApi({ api: deps.api, path: '/api/projects', params: { range }, config: deps.config });
           const items = [];
           for (const p of projects.items ?? []) {
-            const sessions = await deps.api.get(`/api/projects/${p.id}/sessions`, { range });
+            const sessions = await loadApi({
+              api: deps.api,
+              path: `/api/projects/${p.id}/sessions`,
+              params: { range },
+              config: deps.config,
+            });
             for (const s of sessions.items ?? []) items.push({ ...s, projectId: p.id });
           }
           return { items };

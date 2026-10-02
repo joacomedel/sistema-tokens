@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { formatTokens, formatUsd } from '../analyze/format.mjs';
-import { resolveRaw, toolResult } from './common.mjs';
+import { resolveRaw, toolResult, loadApi } from './common.mjs';
 
 function toolSummary(tools) {
   if (!Array.isArray(tools) || !tools.length) return 'sin tool calls';
@@ -23,7 +23,7 @@ export function registerExplainMessage(server, deps) {
         store: deps.store,
         tool: 'explain_message',
         params: { messageId },
-        load: () => deps.api.get(`/api/messages/${messageId}`),
+        load: () => loadApi({ api: deps.api, path: `/api/messages/${messageId}`, params: {}, config: deps.config }),
       });
 
       const t = data.tokens ?? {};

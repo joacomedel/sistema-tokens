@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { formatUsd } from '../analyze/format.mjs';
-import { RANGES, resolveRaw, toolResult } from './common.mjs';
+import { RANGES, resolveRaw, toolResult, loadApi } from './common.mjs';
 
 function truncate(text, max = 80) {
   const one = String(text ?? '').replace(/\s+/g, ' ').trim();
@@ -25,7 +25,7 @@ export function registerTopTurns(server, deps) {
         store: deps.store,
         tool: 'top_turns',
         params: { sessionId, range, limit },
-        load: () => deps.api.get(`/api/sessions/${sessionId}/turns`, { range }),
+        load: () => loadApi({ api: deps.api, path: `/api/sessions/${sessionId}/turns`, params: { range }, config: deps.config }),
       });
 
       const turns = [...(data.turns ?? [])].sort((a, b) => (b.tokens?.cost ?? 0) - (a.tokens?.cost ?? 0)).slice(0, limit);
