@@ -19,8 +19,12 @@ export function registerQueryDb(server, deps) {
       try {
         const rows = deps.db.query(sql);
         const preview = rows.slice(0, 20);
-        const text = `Filas: ${rows.length}\n${preview.map((r) => JSON.stringify(r)).join('\n')}`;
-        return toolResult({ text, structured: { rows: preview, raw: raw ? rows : undefined } });
+        const truncated = rows.length > preview.length;
+        const header = truncated
+          ? `Filas: ${rows.length} (mostrando ${preview.length}; usá raw:true para ver todas)`
+          : `Filas: ${rows.length}`;
+        const text = `${header}\n${preview.map((r) => JSON.stringify(r)).join('\n')}`;
+        return toolResult({ text, structured: { rows: preview, truncated, raw: raw ? rows : undefined } });
       } catch (err) {
         return { content: [{ type: 'text', text: `Consulta rechazada: ${err.message}` }], isError: true };
       }

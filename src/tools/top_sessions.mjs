@@ -52,7 +52,7 @@ export function registerTopSessions(server, deps) {
       });
       return toolResult({
         text: lines.length ? lines.join('\n') : 'Sin sesiones en el rango.',
-        structured: { runId, cached, metric, raw: raw ? data : undefined },
+        structured: { runId, cached, metric, items: top, raw: raw ? data : undefined },
       });
     },
   );

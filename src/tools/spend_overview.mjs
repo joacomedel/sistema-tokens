@@ -29,7 +29,7 @@ export function registerSpendOverview(server, deps) {
       ];
       return toolResult({
         text: lines.join('\n'),
-        structured: { runId, cached, totals: data.totals, raw: raw ? data : undefined },
+        structured: { runId, cached, totals: data.totals, projects, raw: raw ? data : undefined },
       });
     },
   );
