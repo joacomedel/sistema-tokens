@@ -19,8 +19,21 @@ usa como fallback la BD de OpenCode en **modo read-only**.
 | `recall` | Reconsulta runs guardados (raw) sin reanalizar. |
 | `query_db` | SELECT ad-hoc contra la BD de OpenCode, read-only y con LIMIT forzado. |
 
-Las salidas son texto resumido; con `raw: true` se agrega el JSON crudo. Cada run
-queda guardado en `store/` (git-ignored) y es reconsultable con `recall`.
+Cada salida trae el resumen en texto y los datos principales en `structuredContent`
+(proyectos en `spend_overview`, ranking en `top_sessions`, etc.). Con `raw: true`
+se agrega el JSON crudo completo. Cada run queda guardado en `store/` (git-ignored)
+y es reconsultable con `recall`.
+
+## Base de datos (V1/V2)
+
+La BD de OpenCode tiene dos modelos de datos y **la fuente canónica para el gasto es la V2**:
+
+| Tabla | Rol |
+|-------|-----|
+| `session_message` + `session_v2` | V2, superset: incluye las sesiones V1 migradas y las nuevas. |
+| `message` | Formato V1 (histórico). Analizar solo esto subestima el gasto (~57 %). |
+
+Regla práctica: los agregados de costo salen de `session_message`/`session_v2`; `message` no se usa para totales.
 
 ## Configuración (variables de entorno)
 

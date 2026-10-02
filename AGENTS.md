@@ -32,6 +32,7 @@ HTTP la API de `sistemaTokens` (fuente primaria) y usa la BD de OpenCode en modo
 - **stdout es el canal JSON-RPC**: logs solo por `console.error`/stderr.
 - Reutilizar la API de `sistemaTokens`; no recopiar sus queries.
 - Tools read-only; `query_db` acepta solo `SELECT`/`WITH` y fuerza `LIMIT`.
+- Las tools exponen el resumen principal en `structuredContent` siempre; `raw` es opcional y queda en el store para `recall`.
 - Umbrales únicos y versionados en `src/analyze/thresholds.mjs`.
 - `store/` va en `.gitignore` (contiene prompts y mensajes).
 - ESM, Node ≥ 24, sin build step.
@@ -50,3 +51,5 @@ HTTP la API de `sistemaTokens` (fuente primaria) y usa la BD de OpenCode en modo
 - `loadApi` convierte fallas de red en un error accionable (no un stacktrace).
 - `diagnose(scope=turn)` requiere `sessionId` + `id`; para `project`/`session` sin
   `id`, arranca desde el hijo más caro.
+- Gasto: la fuente canónica es V2 (`session_message`/`session_v2`); `message` es V1
+  y subestima (~57 %). No mezclar tablas en agregados.
