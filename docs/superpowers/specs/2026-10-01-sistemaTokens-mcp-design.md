@@ -18,6 +18,8 @@ ver señales de causa, pero:
   turnos sin cache") ni que **sugiera** optimizaciones.
 - Un agente (OpenCode, Claude, etc.) no puede consultar esa información como
   herramienta.
+- Reanalizar lo mismo cuesta (contexto y tiempo): no hay memoria de los análisis
+  hechos.
 
 ## Objetivo
 
@@ -29,6 +31,9 @@ pueda responder preguntas como:
 - ¿Por qué: sin cache, modelo caro, output largo, razonamiento alto,
   compactaciones, fan-out de subagentes, re-lecturas?
 - ¿Se podía optimizar? ¿Qué cambiaría?
+
+Además, cada análisis debe quedar **guardado en crudo** para poder reconsultarlo
+después sin volver a analizar todo.
 
 ## No-objetivos
 
@@ -48,6 +53,9 @@ pueda responder preguntas como:
 | Repo | `/home/jm/opencode/sistemaTokens-mcp`, independiente |
 | Lenguaje | JavaScript ESM (Node ≥ 24, sin build step) |
 | Transporte | stdio (MCP local) |
+| Alcance de `top_sessions` | Sin `project`, recorre **todos** los proyectos |
+| Salidas | **Resumen** por defecto + **raw** a pedido |
+| Raw | Se **persiste** en el repo para reconsultar sin reanalizar |
 
 ## Arquitectura
 
@@ -60,6 +68,7 @@ sistemaTokens-mcp
   ├── client/api.mjs    → fetch a SISTEMA_TOKENS_URL
   ├── client/db.mjs     → SQLite read-only (fallback + query_db)
   ├── analyze/          → heurísticas de diagnose y agregación de causas
+  ├── store/            → persistencia de runs (raw crudo + índice)
   └── index.mjs         → arranque del server MCP
         │
         ├── HTTP ──► sistemaTokens (127.0.0.1:4747)  ← fuente primaria
@@ -73,6 +82,24 @@ sistemaTokens-mcp
 - **BD directa**: se usa cuando (a) la API no está disponible, o (b) el tool
   `query_db` necesita algo que la API no expone. La conexión es `readOnly`.
 
+### Store de runs (raw persistido)
+
+Cada ejecución de un tool que trae/analiza datos genera un **run**:
+
+- `store/runs/<runId>.json`: el **raw completo** de la respuesta (API + findings).
+- `store/index.jsonl`: una línea por run con `runId`, `tool`, `params`, `range`,
+  `createdAt`, `source` (`api|db|cache`) y tamaño.
+
+Reglas:
+
+- `runId` = hash determinístico de `(tool, params normalizados)`; la misma
+  consulta reusa el mismo id y actualiza el raw (se conserva el último).
+- `MCP_CACHE_TTL_MS`: si existe un run para la misma consulta y no venció, los
+  tools **reutilizan** el raw en vez de pegarle a la API o recalcular.
+- El raw se retiene igual aunque venza el TTL: sirve para `recall`.
+- `store/` va en `.gitignore`; contiene prompts/mensajes, es local y sensible.
+- `MCP_STORE=0` desactiva la persistencia por completo.
+
 ## Configuración
 
 Variables de entorno (declaradas al registrar el MCP en `opencode.json`):
@@ -83,6 +110,9 @@ Variables de entorno (declaradas al registrar el MCP en `opencode.json`):
 | `OPENCODE_DB` | `$XDG_DATA_HOME/opencode/opencode.db` (o `~/.local/share/...`) | BD para fallback/ad-hoc |
 | `MCP_DB_FALLBACK` | `1` | `0` desactiva el fallback a BD |
 | `MCP_HTTP_TIMEOUT_MS` | `5000` | Timeout de requests a la API |
+| `MCP_STORE_DIR` | `<repo>/store` | Dónde se persisten los runs |
+| `MCP_STORE` | `1` | `0` desactiva la persistencia |
+| `MCP_CACHE_TTL_MS` | `600000` (10 min) | Vigencia del raw para reutilizar |
 
 Ejemplo de registro en `opencode.jsonc` (schema V2: los servers van bajo
 `mcp.servers`, y se usa `disabled` para dejarlo configurado sin conectar):
@@ -108,30 +138,32 @@ Alternativa por CLI: `opencode mcp add sistemaTokens -- node /home/jm/opencode/s
 
 ## Tools
 
-Todas read-only. Las salidas son **texto resumido** (no JSON crudo) salvo que se
-pida `raw`, para cuidar el contexto del agente.
+Todas read-only. Por defecto devuelven **texto resumido** (para cuidar el
+contexto del agente); con `raw: true` devuelven además el **JSON crudo**. Todo
+run queda registrado en el store y es reconsultable con `recall`.
 
 `range` ∈ `today | 7d | 30d | month | all` (default `30d`).
 `metric` ∈ `effective | cost | total | cacheRead` (default `effective`).
 
-### `spend_overview(range)`
+### `spend_overview(range, raw?)`
 Totales globales + top N proyectos. Punto de entrada barato.
 Fuente: `GET /api/projects?range=`.
 
-### `top_sessions(range, project?, metric?, limit=10)`
-Ranking de sesiones (incluye subagentes marcados y agrupables).
-Fuente: `GET /api/projects/:id/sessions` (o recorre proyectos si no se pasa `project`).
+### `top_sessions(range, project?, metric?, limit=10, raw?)`
+Ranking de sesiones (incluye subagentes marcados y agrupables). **Sin `project`,
+recorre todos los proyectos** y devuelve el ranking global.
+Fuente: `GET /api/projects/:id/sessions` por cada proyecto.
 
-### `top_turns(sessionId, limit=10)`
+### `top_turns(sessionId, limit=10, raw?)`
 Turnos que concentran el gasto de una sesión, con prompt y señales.
 Fuente: `GET /api/sessions/:id/turns?range=`.
 
-### `explain_message(messageId)`
+### `explain_message(messageId, raw?)`
 Detalle del mensaje + desglose de tokens + tools + "¿por qué?" + disparador
 (prompt del usuario, o task del subagente padre).
 Fuente: `GET /api/messages/:id`.
 
-### `diagnose(scope, id?, range?)`
+### `diagnose(scope, id?, range?, raw?)`
 **El core.** Recorre el árbol y devuelve hallazgos con evidencia.
 
 - `scope`: `global | project | session | turn | message`.
@@ -141,6 +173,7 @@ Devuelve:
 
 ```json
 {
+  "runId": "a1b2c3d4",
   "scope": "project",
   "subject": { "id": "...", "label": "..." },
   "range": "30d",
@@ -159,6 +192,9 @@ Devuelve:
 }
 ```
 
+El `runId` queda en el store: se puede pedir el crudo completo con
+`recall(runId)` sin reanalizar.
+
 Reglas heurísticas (umbrales provisorios, a calibrar):
 
 | Code | Disparador |
@@ -176,10 +212,18 @@ Reglas heurísticas (umbrales provisorios, a calibrar):
 Cada finding incluye **evidencia numérica**; la recomendación final la redacta
 el agente que llamó al tool.
 
-### `quota_status()`
+### `quota_status(raw?)`
 Ventanas de cuota del plan. Fuente: `GET /api/quota`.
 
-### `query_db(sql)`
+### `recall(runId?, path?, limit=20, raw?)`
+Re-consulta análisis previos desde el store, **sin** volver a pegarle a la API ni
+recalcular.
+
+- Sin `runId`: lista los últimos runs (id, tool, params, fecha, tamaño).
+- Con `runId`: devuelve el raw guardado; si se pasa `path` (dotted, ej.
+  `findings.0.evidence`), devuelve solo esa parte.
+
+### `query_db(sql, raw?)`
 Consulta ad-hoc read-only para profundizar (ej. partes/raw que la API no da).
 
 Guardrails:
@@ -195,12 +239,16 @@ Guardrails:
 - `analyze/*`: tablas de casos → findings esperados (sin red, sin BD).
 - `client/db.mjs`: sqlite temporal `readOnly`; casos de `query_db` permitido y
   bloqueado.
+- `store/*`: escritura/lectura de runs, reutilización por TTL, `recall` por id y
+  por path; store desactivado.
 - Smoke de integración opcional contra `sistemaTokens` real (marcado, no en CI).
 
 ## Privacidad y seguridad
 
 - Todo local (`stdio`, `127.0.0.1`).
 - Nunca escribe: API es de solo lectura y la BD se abre `readOnly`.
+- El `store/` contiene prompts y mensajes: queda en `.gitignore`, es local y se
+  puede desactivar con `MCP_STORE=0`.
 - No loguea credenciales ni tokens de cuota.
 - `query_db` restringido como se describe arriba.
 
@@ -209,9 +257,6 @@ Guardrails:
 1. Umbrales exactos de las heurísticas (¿calibramos contra tu BD real?).
 2. ¿`diagnose` baja solo un nivel (recomienda el próximo `diagnose`) o recorre
    todo el árbol en una sola llamada? (propuesto: un nivel + `next`).
-3. ¿`top_sessions` sin `project` recorre todos los proyectos (más lento) o exige
-   `project`?
-4. ¿Agregamos `raw` en las salidas o siempre texto resumido?
 
 ## Próximo paso
 
