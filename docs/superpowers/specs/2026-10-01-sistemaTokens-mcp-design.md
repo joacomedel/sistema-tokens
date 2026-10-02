@@ -5,7 +5,7 @@ MCP local para **analizar el gasto de tokens de OpenCode** reutilizando la API d
 optimizar*.
 
 Fecha: 2026-10-01
-Estado: revisada — pendiente calibrar umbrales contra la BD real
+Estado: revisada — umbrales calibrados contra la BD real (2026-10-01)
 
 ## Problema
 
@@ -198,19 +198,20 @@ Devuelve:
 El `runId` queda en el store: se puede pedir el crudo completo con
 `recall(runId)` sin reanalizar.
 
-Reglas heurísticas (umbrales provisorios, a calibrar contra la BD real):
+Reglas heurísticas (**umbrales calibrados** contra la BD real el 2026-10-01; ver
+sección *Calibración de umbrales*):
 
 | Code | Disparador |
 |------|-----------|
-| `cost_concentration` | top 3 turnos/mensajes ≥ 50% del costo del scope |
-| `no_cache_input` | input alto sin `cacheRead` (≥ p75 del set) |
-| `low_cache_hit` | `cacheRead / (cacheRead+input)` bajo con contexto grande |
-| `expensive_model_mismatch` | flag `expensive_model` en turnos con pocas tool calls / output corto |
+| `cost_concentration` | top 3 hijos ≥ 50% del costo del scope (requiere ≥ 5 hijos) |
+| `no_cache_input` | input ≥ 8k y `cacheRead` ≤ 10% del input |
+| `low_cache_hit` | hit ratio < 90% con contexto (`input+cacheRead`) ≥ 120k |
+| `expensive_model_mismatch` | costo/mensaje ≥ US$0.01 y output corto (< 500) o ≤ 1 tool call |
 | `high_reasoning_share` | reasoning ≥ 25% de los tokens efectivos |
-| `long_output` | flag `long_output` (output ≥ p90) |
-| `subagent_fanout` | muchos subagentes con contexto repetido |
-| `repeated_tool_calls` | mismos tool calls repetidos dentro de una sesión |
-| `compaction_overhead` | sesiones con `compacted` y costo alto post-compactación |
+| `long_output` | output ≥ 1.000 tokens |
+| `subagent_fanout` | ≥ 5 subagentes bajo un mismo padre |
+| `repeated_tool_calls` | ≥ 3 tool calls idénticos en una sesión *(sin calibrar)* |
+| `compaction_overhead` | sesión compactada con costo post-compactación alto *(sin datos en el período)* |
 
 Cada finding incluye **evidencia numérica**; la recomendación final la redacta
 el agente que llamó al tool.
@@ -249,6 +250,31 @@ Los umbrales de las heurísticas se calibran contra la BD real de OpenCode
   `analyze/thresholds.mjs`, con un test que las valide.
 
 No requiere que `sistemaTokens` esté corriendo: se lee la BD directo.
+
+### Resultados (2026-10-01, range=all)
+
+Base: **11 proyectos, 151 sesiones, 403 turnos, 3.178 mensajes, US$5.09**.
+
+| Métrica | p50 | p75 | p90 |
+|---------|----:|----:|----:|
+| `tokens.input` | 1.1k | 3.5k | 7.9k |
+| `tokens.cacheRead` | 68k | 123k | 170k |
+| `tokens.output` | 190 | 396 | 932 |
+| `tokens.reasoning` | 110 | 670 | 2.1k |
+| `tokens.effective` | 2.2k | 5.3k | 10k |
+| costo por turno | $0.0011 | $0.0107 | $0.0286 |
+| mensajes por turno | 4 | 8 | 17 |
+| mensajes por sesión | 6 | 19 | 54 |
+
+- **Cache muy sano**: hit ratio p50 = 98,5%; solo 3,1% de los mensajes < 10%.
+- **Costo por modelo**: `deepseek-v4.1-flash` $0.0018/msg (69% del costo, 1.926 msgs),
+  `kimi-k3` $0.0593/msg, `deepseek-v4-pro` $0.0100/msg; promedio global $0.0016/msg.
+- **Concentración**: top-3 proyectos = 81% del gasto global; top-3 turnos/sesión
+  (≥5 turnos) p50 = 60%; top-3 mensajes/sesión (≥5 msgs) p50 = 35%.
+- **Subagentes**: 55 en total; un padre con 23.
+- **Compactación**: 0 sesiones en el período (heurística sin calibrar).
+- Validación de reglas: `no_cache_input` dispara en 84 msgs (**14,5% del costo**);
+  `long_output` en 291 msgs (**18% del costo**); `low_cache_hit` (<50%) en 5,5%.
 
 ## Testing (repo del MCP)
 
