@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { analyzeMessages, analyzeConcentration, analyzeFanout } from '../analyze/heuristics.mjs';
+import { analyzeMessages, analyzeConcentration, analyzeFanout, analyzeCompaction } from '../analyze/heuristics.mjs';
 import { formatFindings } from '../analyze/format.mjs';
 import { RANGES, resolveRaw, toolResult, loadApi } from './common.mjs';
 
@@ -47,12 +47,13 @@ async function collect({ deps, scope, id, sessionId, range }) {
     const sessions = await get(deps, `/api/projects/${projectId}/sessions`, { range });
     const items = sessions.items ?? [];
     const children = items.map((s) => ({ type: 'session', id: s.id, label: s.title, cost: s.tokens?.cost ?? 0 }));
+    const compaction = analyzeCompaction(items);
     return {
       scope,
       subject: { id: projectId, label: projectId },
       range,
       totals: totalsFrom(children, { sessions: items.length }),
-      findings: [analyzeConcentration(children), analyzeFanout(items)].filter(Boolean),
+      findings: [analyzeConcentration(children), analyzeFanout(items), compaction].filter(Boolean),
       next: topOf(children) ? [`diagnose scope=session id=${topOf(children).id}`] : [],
     };
   }
@@ -73,12 +74,28 @@ async function collect({ deps, scope, id, sessionId, range }) {
     const turns = data.turns ?? [];
     const children = turns.map((t) => ({ type: 'turn', id: t.id, label: `Turno ${t.index + 1}`, cost: t.tokens?.cost ?? 0 }));
     const messages = turns.flatMap((t) => t.messages ?? []);
+
+    // Fetch detalles de los mensajes más caros para alimentar repeated_tool_calls
+    const topMessages = [...messages].sort((a, b) => (b.tokens?.cost ?? 0) - (a.tokens?.cost ?? 0)).slice(0, 15);
+    const details = await Promise.all(
+      topMessages.map(async (m) => {
+        try {
+          const d = await get(deps, `/api/messages/${m.id}`, {}, range);
+          return { ...m, tools: d.tools ?? null };
+        } catch {
+          return { ...m, tools: null };
+        }
+      }),
+    );
+    const detailMap = new Map(details.map((d) => [d.id, d]));
+    const enrichedMessages = messages.map((m) => detailMap.get(m.id) ?? m);
+
     return {
       scope,
       subject: { id: resolvedId, label: resolvedId },
       range,
       totals: totalsFrom(children, { turns: turns.length, messages: messages.length }),
-      findings: [analyzeConcentration(children), ...analyzeMessages(messages)].filter(Boolean),
+      findings: [analyzeConcentration(children), ...analyzeMessages(enrichedMessages)].filter(Boolean),
       next: topOf(children) ? [`diagnose scope=turn id=${topOf(children).id} sessionId=${resolvedId}`] : [],
     };
   }

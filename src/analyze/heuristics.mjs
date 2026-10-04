@@ -9,6 +9,8 @@ const HYPOTHESES = {
   expensive_model_mismatch: 'Modelo caro para una respuesta corta: evaluar un modelo más barato para esa tarea.',
   cost_concentration: 'Pocos hijos concentran casi todo el gasto; enfocar la optimización ahí antes que en el resto.',
   subagent_fanout: 'Muchos subagentes bajo el mismo padre: contexto repetido; evaluar hacerlo en una sola sesión.',
+  repeated_tool_calls: 'Múltiples llamadas idénticas a la misma tool: posible loop o re-lecturas innecesarias; revisar si se puede cachear o agrupar.',
+  compaction_overhead: 'Sesión compactada con costo alto: la compactación no redujo suficiente el gasto; revisar gestión de contexto.',
 };
 
 function round1(n) {
@@ -72,7 +74,49 @@ export function analyzeMessages(messages, { thresholds = THRESHOLDS } = {}) {
     });
   }
 
+  // repeated_tool_calls: requiere datos de tools por mensaje (getMessageDetail)
+  const repeatedFindings = analyzeRepeatedToolCalls(messages, thresholds);
+  findings.push(...repeatedFindings);
+
   return findings.sort((a, b) => b.share_pct - a.share_pct);
+}
+
+/**
+ * Detecta mensajes con >= N llamadas idénticas a la misma tool.
+ * Requiere que los mensajes incluyan `tools: [{ name, count }]`.
+ */
+function analyzeRepeatedToolCalls(messages, thresholds) {
+  const totalCost = messages.reduce((a, m) => a + (m.tokens?.cost ?? 0), 0);
+  const findings = [];
+
+  // Agrupar por tool name: contar mensajes afectados y costo total
+  const byTool = new Map();
+  for (const m of messages) {
+    if (!m.tools) continue;
+    for (const t of m.tools) {
+      if (t.count < thresholds.repeatedToolCalls) continue;
+      if (!byTool.has(t.name)) byTool.set(t.name, { tool: t.name, count: t.count, messages: [], cost: 0 });
+      const entry = byTool.get(t.name);
+      entry.messages.push(m);
+      entry.cost += m.tokens?.cost ?? 0;
+      entry.count = Math.max(entry.count, t.count);
+    }
+  }
+
+  for (const entry of byTool.values()) {
+    const sharePct = totalCost > 0 ? round1((entry.cost / totalCost) * 100) : 0;
+    const subject = worst(entry.messages);
+    findings.push({
+      code: 'repeated_tool_calls',
+      severity: severityFor(sharePct),
+      share_pct: sharePct,
+      subject: { type: 'message', id: subject.id, label: subject.label ?? subject.id },
+      evidence: { tool: entry.tool, count: entry.count, messages: entry.messages.length, cost: Math.round(entry.cost * 1e6) / 1e6 },
+      hypothesis: HYPOTHESES.repeated_tool_calls,
+    });
+  }
+
+  return findings;
 }
 
 const costOf = (child) => child.cost ?? child.tokens?.cost ?? 0;
@@ -119,5 +163,32 @@ export function analyzeFanout(sessions, { thresholds = THRESHOLDS } = {}) {
     subject: { type: 'session', id: parentId, label: parentId },
     evidence: { subagents: max },
     hypothesis: HYPOTHESES.subagent_fanout,
+  };
+}
+
+/**
+ * Detecta sesiones compactadas con costo alto relativo a la mediana del scope.
+ * `sessions` = [{ id, cost, compacted }]
+ */
+export function analyzeCompaction(sessions, { thresholds = THRESHOLDS } = {}) {
+  if (!sessions.length) return null;
+  const costs = sessions.map((s) => s.cost ?? 0).sort((a, b) => a - b);
+  const median = costs[Math.floor(costs.length / 2)] ?? 0;
+  if (median <= 0) return null;
+
+  const compacted = sessions.filter((s) => s.compacted && (s.cost ?? 0) >= median * thresholds.compactionCostRatio);
+  if (!compacted.length) return null;
+
+  const subject = compacted.reduce((best, s) => ((s.cost ?? 0) > (best.cost ?? 0) ? s : best), compacted[0]);
+  const totalCost = sessions.reduce((a, s) => a + (s.cost ?? 0), 0);
+  const sharePct = totalCost > 0 ? round1(((subject.cost ?? 0) / totalCost) * 100) : 0;
+
+  return {
+    code: 'compaction_overhead',
+    severity: severityFor(sharePct),
+    share_pct: sharePct,
+    subject: { type: 'session', id: subject.id, label: subject.label ?? subject.id },
+    evidence: { compacted: true, cost: subject.cost ?? 0, median: Math.round(median * 1e6) / 1e6 },
+    hypothesis: HYPOTHESES.compaction_overhead,
   };
 }

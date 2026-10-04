@@ -15,4 +15,5 @@ export const THRESHOLDS = {
   costConcentrationShare: 0.5,
   costConcentrationMinChildren: 5,
   repeatedToolCalls: 3,
+  compactionCostRatio: 2.0,
 };
