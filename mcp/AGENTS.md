@@ -1,8 +1,9 @@
 # sistemaTokens-mcp — guía para agentes
 
-MCP local (stdio) que **analiza el gasto de tokens de OpenCode**. Reutiliza por
-HTTP la API de `sistemaTokens` (fuente primaria) y usa la BD de OpenCode en modo
-**read-only** como fallback y para consultas ad-hoc.
+MCP local (stdio) que **analiza el gasto de tokens de OpenCode**. Vive en `mcp/`
+dentro del repo de `sistemaTokens` y reutiliza por HTTP su API (fuente única de
+datos). En modo **estricto** no accede a la BD de OpenCode: sin la app levantada
+no hay datos.
 
 ## Comandos
 
@@ -14,10 +15,9 @@ HTTP la API de `sistemaTokens` (fuente primaria) y usa la BD de OpenCode en modo
 ## Arquitectura
 
 - `index.mjs` — entry: arma `deps` y conecta `StdioServerTransport`.
-- `src/config.mjs` — entorno → config (URL de la API, BD, store, TTL).
-- `src/server.mjs` — `buildServer(deps)`; `DEFAULT_TOOLS` registra las 8 tools.
+- `src/config.mjs` — entorno → config (URL de la API, store, TTL).
+- `src/server.mjs` — `buildServer(deps)`; `DEFAULT_TOOLS` registra las 7 tools.
 - `src/client/api.mjs` — cliente HTTP (`get`), lanza `ApiError`.
-- `src/client/db.mjs` — SQLite read-only + `guardSelect`.
 - `src/analyze/thresholds.mjs` — umbrales calibrados contra la BD real.
 - `src/analyze/aggregate.mjs` — `sumMetrics`, `percentile`, `topShare`.
 - `src/analyze/heuristics.mjs` — `analyzeMessages`, `analyzeConcentration`, `analyzeFanout`.
@@ -28,10 +28,10 @@ HTTP la API de `sistemaTokens` (fuente primaria) y usa la BD de OpenCode en modo
 
 ## Reglas del proyecto
 
-- La BD de OpenCode se abre **siempre** con `readOnly: true`; nunca escribir.
+- Modo estricto: el MCP **no** accede a la BD de OpenCode; solo consume la API de
+  `sistemaTokens`. Sin la app levantada, cada tool devuelve `isError` accionable.
 - **stdout es el canal JSON-RPC**: logs solo por `console.error`/stderr.
 - Reutilizar la API de `sistemaTokens`; no recopiar sus queries.
-- Tools read-only; `query_db` acepta solo `SELECT`/`WITH` y fuerza `LIMIT`.
 - Las tools exponen el resumen principal en `structuredContent` siempre; `raw` es opcional y queda en el store para `recall`.
 - Umbrales únicos y versionados en `src/analyze/thresholds.mjs`.
 - `store/` va en `.gitignore` (contiene prompts y mensajes).
@@ -48,7 +48,8 @@ HTTP la API de `sistemaTokens` (fuente primaria) y usa la BD de OpenCode en modo
   sin tools responde `-32601`.
 - `resolveRaw` cachea por `(tool, params)` dentro del TTL; con `MCP_STORE=0` no
   persiste.
-- `loadApi` convierte fallas de red en un error accionable (no un stacktrace).
+- `loadApi` convierte fallas de red en un error accionable (no un stacktrace) que
+  recuerda levantar la app con `npm start`.
 - `diagnose(scope=turn)` requiere `sessionId` + `id`; para `project`/`session` sin
   `id`, arranca desde el hijo más caro.
 - Gasto: la fuente canónica es V2 (`session_message`/`session_v2`); `message` es V1

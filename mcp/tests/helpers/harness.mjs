@@ -8,9 +8,9 @@ import { createStore } from '../../src/store/runs.mjs';
 import { THRESHOLDS } from '../../src/analyze/thresholds.mjs';
 
 /** Levanta el server con transporte en memoria y devuelve un Client listo. */
-export async function startHarness({ tools, api, db } = {}) {
+export async function startHarness({ tools, api } = {}) {
   const store = createStore({ dir: mkdtempSync(join(tmpdir(), 'mcp-h-')) });
-  const deps = { config: { cacheTtlMs: 600000 }, api, db, store, thresholds: THRESHOLDS, tools };
+  const deps = { config: { cacheTtlMs: 600000 }, api, store, thresholds: THRESHOLDS, tools };
   const server = buildServer(deps);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);

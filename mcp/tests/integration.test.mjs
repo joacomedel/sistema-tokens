@@ -4,15 +4,13 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { buildServer } from '../src/server.mjs';
 import { createApiClient } from '../src/client/api.mjs';
-import { createDbAccess } from '../src/client/db.mjs';
 import { createStore } from '../src/store/runs.mjs';
 import { THRESHOLDS } from '../src/analyze/thresholds.mjs';
 
-test('el server registra las 8 tools', async () => {
+test('el server registra las 7 tools sin acceso a BD', async () => {
   const server = buildServer({
     config: { cacheTtlMs: 600000 },
     api: createApiClient({ baseUrl: 'http://127.0.0.1:1' }),
-    db: createDbAccess({ dbPath: '/nope.db' }),
     store: createStore({ dir: '/tmp/mcp-int', enabled: false }),
     thresholds: THRESHOLDS,
   });
@@ -24,7 +22,6 @@ test('el server registra las 8 tools', async () => {
   assert.deepEqual(names, [
     'diagnose',
     'explain_message',
-    'query_db',
     'quota_status',
     'recall',
     'spend_overview',

@@ -6,7 +6,6 @@ import { registerExplainMessage } from './tools/explain_message.mjs';
 import { registerQuotaStatus } from './tools/quota_status.mjs';
 import { registerDiagnose } from './tools/diagnose.mjs';
 import { registerRecall } from './tools/recall.mjs';
-import { registerQueryDb } from './tools/query_db.mjs';
 
 export const DEFAULT_TOOLS = [
   registerSpendOverview,
@@ -16,7 +15,6 @@ export const DEFAULT_TOOLS = [
   registerQuotaStatus,
   registerDiagnose,
   registerRecall,
-  registerQueryDb,
 ];
 
 /**

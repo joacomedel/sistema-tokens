@@ -27,7 +27,7 @@ export async function loadApi({ api, path, params, config }) {
     const where = config?.apiUrl ?? 'la API de sistemaTokens';
     const reason = err?.status ? `HTTP ${err.status}` : 'no responde';
     throw new Error(
-      `No se pudo consultar la API de sistemaTokens (${reason}) en ${path}. Levantá el server de sistemaTokens (npm start) o usá query_db contra la BD. URL: ${where}.`,
+      `No se pudo consultar la API de sistemaTokens (${reason}) en ${path}. Levantá la app con 'npm start' en la raíz del repo (modo MCP estricto: sin la app no hay datos). URL: ${where}.`,
     );
   }
 }
