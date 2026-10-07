@@ -4,7 +4,8 @@
     "servers": {
       "sistemaTokens": {
         "type": "local",
-        "command": ["node", "/home/jm/opencode/sistemaTokens-mcp/index.mjs"],
+        "command": ["node", "mcp/index.mjs"],
+        "cwd": ".",
         "environment": {
           "SISTEMA_TOKENS_URL": "http://127.0.0.1:4747"
         }

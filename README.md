@@ -16,9 +16,37 @@ Navegá **proyecto → sesión → turno → mensaje** con barras clickeables, s
 npm start                 # http://127.0.0.1:4747
 npm test                  # suite completa (node:test)
 node scripts/verify.mjs   # verificación cruzada contra tu BD real
+
+# MCP (opcional): consultas por lenguaje natural desde OpenCode
+npm run install:mcp       # instala las deps del MCP (una vez)
+npm run mcp               # corre el MCP por stdio (requiere la app levantada)
+npm run test:mcp          # suite del MCP
 ```
 
 El puerto y los límites manuales de cuota se configuran en `config.json`.
+
+## App y MCP en el mismo repo
+
+Este repo tiene dos formas de usarse y comparten los mismos datos (la BD de OpenCode, leída por la app):
+
+- **App** (`npm start`): visual en `http://127.0.0.1:4747`. Es la superficie principal.
+- **MCP** (`mcp/`, `npm run mcp`): tools de consulta para OpenCode (`spend_overview`, `top_sessions`, `diagnose`, `quota_status`, `recall`, …). Habla con la app por HTTP; **en modo estricto no accede a la BD**, así que necesita la app levantada.
+
+### Clonar en otra máquina (p. ej. el trabajo)
+
+```bash
+git clone <url-del-repo> && cd sistemaTokens
+npm start            # solo la app: cero dependencias, anda directo
+```
+
+Para el MCP, una vez clonado:
+
+```bash
+npm run install:mcp
+opencode mcp add sistemaTokens -- node "$PWD/mcp/index.mjs"   # global, disponible en todo proyecto
+```
+
+El repo ya trae un `opencode.jsonc` de proyecto con la ruta **relativa** (`command: ["node","mcp/index.mjs"]`, `cwd: "."`), así que si abrís OpenCode dentro del repo el MCP queda registrado sin editar nada. La BD y el puerto se toman de los defaults del SO (`$XDG_DATA_HOME/opencode/opencode.db`); nada está hardcodeado a una máquina.
 
 ## Qué muestra
 
