@@ -149,6 +149,19 @@ test('cobertura parcial: sesión v2 podada reporta partial y sessionTotals', asy
     assert.equal(fullBody.source, 'message');
     assert.equal(fullBody.sessionTotals.effective, 380);
 
+    // Turnos: s4 arranca sin prompt (smv1) y luego el turno de "hola" (smv3).
+    const turnsRes = await fetch(`${b}/api/sessions/s4/turns?range=all`);
+    assert.equal(turnsRes.status, 200);
+    const turnsBody = await turnsRes.json();
+    assert.equal(turnsBody.turns.length, 2);
+    assert.equal(turnsBody.turns[0].id, '__none__');
+    assert.equal(turnsBody.turns[1].prompt, 'hola');
+    assert.equal(turnsBody.turns[1].messageCount, 1);
+    assert.deepEqual(turnsBody.turns[1].messages.map((m) => m.id), ['smv3']);
+    assert.ok(Array.isArray(turnsBody.turns[1].messages[0].flags), 'los mensajes del turno van anotados');
+    assert.equal(turnsBody.partial, true);
+    assert.equal(turnsBody.totals.effective, 88);
+
     // s5 cruzó la medianoche: con `today` el recorte es del rango, no poda.
     const today = await fetch(`${b}/api/sessions/s5/messages?range=today`);
     const todayBody = await today.json();

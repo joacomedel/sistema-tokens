@@ -2,7 +2,7 @@
 
 Visualizador local del consumo de tokens de **[OpenCode](https://opencode.ai) v2** — _local token-usage visualizer for OpenCode v2_.
 
-Navegá **proyecto → sesión → mensaje** con barras clickeables, señales de causa automáticas y panel de cuota del plan. Pensado para encontrar a ojo los cuellos de botella de consumo: qué carpeta gasta, qué sesión (o subagente) lo explica, y qué mensaje puntual lo causó.
+Navegá **proyecto → sesión → turno → mensaje** con barras clickeables, señales de causa automáticas y panel de cuota del plan. Pensado para encontrar a ojo los cuellos de botella de consumo: qué carpeta gasta, qué sesión (o subagente) lo explica, qué turno concentró el gasto y qué mensaje puntual lo causó.
 
 ## Requisitos
 
@@ -24,7 +24,9 @@ El puerto y los límites manuales de cuota se configuran en `config.json`.
 
 - **Nivel 1 — Proyectos:** qué carpeta de trabajo concentra tokens, costo y sesiones.
 - **Nivel 2 — Sesiones:** una barra por sesión, con los subagentes marcados y agrupables por su padre.
-- **Nivel 3 — Mensajes:** cada respuesta del modelo con tokens (input/output/reasoning/cache), costo, duración y resumen de tool calls.
+- **Nivel 3 — Turnos:** una barra por cada prompt que enviás, con tokens/costo sumados de sus respuestas, cantidad de mensajes y cuántos traen señales.
+- **Nivel 4 — Mensajes:** las llamadas específicas del turno, con tokens (input/output/reasoning/cache), costo, duración y resumen de tool calls.
+- **Disparador:** en el detalle de un mensaje se ve qué lo originó: el prompt del usuario que abrió el turno, qué venía diciendo el modelo justo antes (para entender respuestas cortas como "sí"), y si la sesión es un subagente, la sesión padre y el tool `task` que lo lanzó. Se navega con **◀ anterior / siguiente ▶** dentro del turno (o las flechas ←/→).
 - **Señales automáticas** (percentiles del set visible): contexto sin cache · output largo · modelo caro · razonamiento alto · sesión compactada · exceso de subagentes.
 - **Panel de cuota:** ventanas de 5 h / semanal / mensual del plan Go vía API, con fallback de cálculo local si la API no responde.
 - Filtros de rango (hoy / 7 días / 30 días / mes / todo) y de métrica (tokens efectivos / USD / tokens totales / cache-read).

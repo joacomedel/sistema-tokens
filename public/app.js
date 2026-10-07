@@ -5,8 +5,12 @@ const state = {
   metric: 'effective',
   projectId: null,
   sessionId: null,
+  currentTurn: null,
+  openMessageId: null,
   groupByParent: false,
-  data: { projects: null, sessions: null, messages: null },
+  excludeModels: [],
+  allModels: [],
+  data: { projects: null, sessions: null, turns: null },
 };
 
 const METRIC_COLORS = {
@@ -55,11 +59,21 @@ function fmtDuration(ms) {
   if (ms < 60000) return `${(ms / 1000).toFixed(1)} s`;
   return `${Math.round(ms / 60000)} min`;
 }
+function truncate(s, n) {
+  const one = String(s ?? '').replace(/\s+/g, ' ').trim();
+  return one.length > n ? `${one.slice(0, n - 1)}…` : one;
+}
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
 /* ---------- api / feedback ---------- */
+function withExcludeModels(base) {
+  if (!state.excludeModels.length) return base;
+  const params = state.excludeModels.map((m) => `excludeModels=${encodeURIComponent(m)}`).join('&');
+  return `${base}${base.includes('?') ? '&' : '?'}${params}`;
+}
+
 async function api(path) {
   const res = await fetch(path);
   let body = null;
@@ -163,13 +177,25 @@ async function loadQuota() {
   }
 }
 
+/* ---------- modelos ---------- */
+async function loadModels() {
+  const el = $('exclude-models');
+  try {
+    const body = await api('/api/models');
+    state.allModels = body.models;
+    el.innerHTML = body.models.map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
+  } catch (err) {
+    // si no se pueden cargar los modelos, el select queda vacío
+  }
+}
+
 /* ---------- nivel 1: proyectos ---------- */
 async function loadProjects() {
   const el = $('level-1');
   el.classList.remove('hidden');
   el.classList.add('loading');
   try {
-    const body = await api(`/api/projects?range=${state.range}`);
+    const body = await api(withExcludeModels(`/api/projects?range=${state.range}`));
     state.data.projects = body;
     renderProjects();
   } catch (err) {
@@ -203,7 +229,7 @@ async function loadSessions(projectId) {
   el.classList.remove('hidden');
   el.classList.add('loading');
   try {
-    const body = await api(`/api/projects/${projectId}/sessions?range=${state.range}`);
+    const body = await api(withExcludeModels(`/api/projects/${projectId}/sessions?range=${state.range}`));
     state.data.sessions = body;
     renderSessions();
   } catch (err) {
@@ -253,21 +279,90 @@ function renderSessions() {
   renderBars($('level-2'), sessionItems(), { onSelect: (item) => openSession(item.id) });
 }
 
-/* ---------- nivel 3: mensajes ---------- */
-async function loadMessages(sessionId) {
+/* ---------- nivel 3: turnos ---------- */
+async function loadTurns(sessionId) {
   const el = $('level-3');
   el.classList.remove('hidden');
   el.classList.add('loading');
   try {
-    const body = await api(`/api/sessions/${sessionId}/messages?range=${state.range}`);
-    state.data.messages = body;
-    renderMessages();
+    const body = await api(withExcludeModels(`/api/sessions/${sessionId}/turns?range=${state.range}`));
+    state.data.turns = body;
+    indexTurnMessages();
+    if (state.currentTurn) state.currentTurn = findTurn(state.currentTurn.id);
+    renderTurns();
+    if (state.currentTurn) renderMessages();
+    else resetTurn();
   } catch (err) {
     errorContent(el, err.message);
   } finally {
     el.classList.remove('loading');
   }
   renderBreadcrumb();
+}
+
+function turnsList() {
+  return state.data.turns?.turns ?? [];
+}
+function findTurn(id) {
+  return turnsList().find((t) => t.id === id) ?? null;
+}
+function allMessages() {
+  return turnsList().flatMap((t) => t.messages);
+}
+function indexTurnMessages() {
+  let i = 0;
+  for (const turn of turnsList()) {
+    for (const m of turn.messages) m.globalIndex = i++;
+  }
+}
+function turnOfMessage(messageId) {
+  return turnsList().find((t) => t.messages.some((m) => m.id === messageId)) ?? null;
+}
+function turnSignalCount(turn) {
+  return turn.messages.filter((m) => m.flags.length > 0).length;
+}
+
+function renderTurns() {
+  const body = state.data.turns;
+  if (!body) return;
+  const el = $('level-3');
+  const items = turnsList().map((turn) => {
+    const signals = turnSignalCount(turn);
+    return {
+      id: turn.id,
+      kind: 'turn',
+      name: `Turno ${turn.index + 1} · ${turn.promptTime ? fmtTime(turn.promptTime) : '—'}`,
+      notes: `${turn.prompt ? truncate(turn.prompt, 90) : '(sin prompt previo)'} · ${turn.messageCount} ${turn.messageCount === 1 ? 'mensaje' : 'mensajes'}`,
+      value: turn.tokens[state.metric],
+      flags: signals ? [{ code: 'summary', label: `${signals} mensajes con señales` }] : [],
+      turn,
+    };
+  });
+  items.sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+  renderBars(el, items, { onSelect: (item) => openTurn(item.turn) });
+
+  const notes = [];
+  if (body.partial && body.sessionTotals) {
+    notes.push(
+      `Mostrando ${fmtTokens(body.totals.effective)} de ${fmtTokens(body.sessionTotals.effective)} tokens efectivos de la sesión: OpenCode poda los mensajes más viejos, y esos no se pueden desglosar.`,
+    );
+  }
+  if (body.skipped > 0) {
+    notes.push(`${body.skipped} mensajes salteados (datos ilegibles o sin tokens)`);
+  }
+  for (const note of notes.reverse()) {
+    const p = document.createElement('p');
+    p.className = 'state';
+    p.textContent = note;
+    el.prepend(p);
+  }
+}
+
+function resetTurn() {
+  state.currentTurn = null;
+  const el = $('level-4');
+  el.classList.add('hidden');
+  el.innerHTML = '';
 }
 
 function messageNotes(m) {
@@ -282,6 +377,13 @@ function messageNotes(m) {
   return parts.join(' · ');
 }
 
+function triggerPreview(trigger) {
+  if (!trigger) return '';
+  if (trigger.subagent) return `↩ task ${trigger.subagent.subagentType ?? ''} desde «${truncate(trigger.subagent.parentTitle, 40)}»`.trim();
+  if (trigger.user?.text) return `↩ ${truncate(trigger.user.text, 90)}`;
+  return '';
+}
+
 function messageTooltip(m) {
   const t = m.tokens;
   const lines = [
@@ -294,6 +396,8 @@ function messageTooltip(m) {
     `costo: ${fmtUsd(t.cost)}`,
   ];
   if (m.flags.length) lines.push(`señales: ${m.flags.map((f) => f.label).join(', ')}`);
+  const trigger = triggerPreview(m.trigger);
+  if (trigger) lines.push(`disparador: ${trigger.replace(/^↩\s*/, '')}`);
   return lines.join('\n');
 }
 
@@ -343,14 +447,16 @@ function whyLines(m, setItems) {
   return lines;
 }
 
+/* ---------- nivel 4: mensajes del turno ---------- */
 function renderMessages() {
-  const body = state.data.messages;
-  if (!body) return;
-  const el = $('level-3');
-  const items = body.items.map((m, i) => ({
+  const turn = state.currentTurn;
+  if (!turn) return;
+  const el = $('level-4');
+  el.classList.remove('hidden');
+  const items = turn.messages.map((m) => ({
     id: m.id,
     kind: 'message',
-    name: `#${i + 1} · ${fmtTime(m.timeCreated)}`,
+    name: `#${(m.globalIndex ?? 0) + 1} · ${fmtTime(m.timeCreated)}`,
     notes: messageNotes(m),
     value: m.tokens[state.metric],
     flags: m.flags,
@@ -358,34 +464,97 @@ function renderMessages() {
   }));
   items.sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
   renderBars(el, items, { onSelect: (item) => openDrawer(item.id) });
-  const notes = [];
-  if (body.partial && body.sessionTotals) {
-    notes.push(
-      `Mostrando ${fmtTokens(body.totals.effective)} de ${fmtTokens(body.sessionTotals.effective)} tokens efectivos de la sesión: OpenCode poda los mensajes más viejos, y esos no se pueden desglosar.`,
-    );
-  }
-  if (body.skipped > 0) {
-    notes.push(`${body.skipped} mensajes salteados (datos ilegibles o sin tokens)`);
-  }
-  for (const note of notes.reverse()) {
-    const p = document.createElement('p');
-    p.className = 'state';
-    p.textContent = note;
-    el.prepend(p);
-  }
+}
+
+function openTurn(turn) {
+  state.currentTurn = turn;
+  closeDrawer();
+  renderMessages();
+  renderBreadcrumb();
 }
 
 /* ---------- drawer ---------- */
+function messageLabel(id) {
+  const m = allMessages().find((x) => x.id === id);
+  return m && m.globalIndex != null ? `#${m.globalIndex + 1}` : '';
+}
+
+/** Vecinos dentro del turno actual (para navegar sin salir del turno). */
+function messageSeq(messageId) {
+  const msgs = state.currentTurn?.messages ?? [];
+  const idx = msgs.findIndex((x) => x.id === messageId);
+  return {
+    msgs,
+    idx,
+    prev: idx > 0 ? msgs[idx - 1] : null,
+    next: idx >= 0 && idx < msgs.length - 1 ? msgs[idx + 1] : null,
+  };
+}
+
+/** Último mensaje del modelo anterior al prompt que disparó al actual (cualquier turno). */
+function respondedToOf(messageId, triggerUser) {
+  if (!triggerUser) return null;
+  const items = allMessages();
+  const idx = items.findIndex((x) => x.id === messageId);
+  const t = triggerUser.timeCreated;
+  for (let i = idx - 1; i >= 0; i--) {
+    if (t == null || items[i].timeCreated < t) return items[i];
+  }
+  return null;
+}
+
+function triggerHtml(trigger, { respondedTo = null } = {}) {
+  const parts = [];
+  const sub = trigger?.subagent;
+  const user = trigger?.user;
+
+  if (sub) {
+    const who = escapeHtml(sub.parentTitle || sub.parentSessionId);
+    const via = sub.subagentType ? ` con el tool task (<code>${escapeHtml(sub.subagentType)}</code>)` : ' con el tool task';
+    const what = sub.description ? `: ${escapeHtml(sub.description)}` : '.';
+    parts.push(`<p class="trigger-origin">Lanzado desde la sesión <strong>${who}</strong>${via}${what}</p>`);
+    if (sub.prompt) parts.push(`<blockquote class="prompt">${escapeHtml(sub.prompt)}</blockquote>`);
+  }
+
+  if (user) {
+    const sameAsTask = sub?.prompt && user.text && user.text.trim() === sub.prompt.trim();
+    if (!sameAsTask) {
+      if (respondedTo) {
+        parts.push(
+          `<p class="trigger-origin">El modelo venía diciendo <button type="button" class="link" data-open="${respondedTo.id}">${messageLabel(respondedTo.id)}</button> · ${fmtTime(respondedTo.timeCreated)}</p>`,
+        );
+        parts.push(`<blockquote class="prompt">${respondedTo.text ? escapeHtml(respondedTo.text) : '(sin texto; solo tool calls)'}</blockquote>`);
+      }
+      parts.push(`<p class="trigger-origin">Prompt del usuario${user.timeCreated ? ` · ${fmtDate(user.timeCreated)}` : ''}</p>`);
+      parts.push(`<blockquote class="prompt">${escapeHtml(user.text || '(vacío)')}</blockquote>`);
+    }
+  }
+
+  if (!parts.length) return '<p class="state">Sin disparador registrado.</p>';
+  return parts.join('');
+}
+
 async function openDrawer(messageId) {
   const el = $('drawer');
+  state.openMessageId = messageId;
   el.classList.remove('hidden');
   el.innerHTML = '<p class="state">Cargando…</p>';
   try {
     const d = await api(`/api/messages/${messageId}`);
-    const setItem = state.data.messages?.items.find((x) => x.id === messageId) ?? null;
-    const why = setItem ? whyLines(setItem, state.data.messages.items) : [];
+    const { prev, next, idx } = messageSeq(messageId);
+    const msg = allMessages().find((x) => x.id === messageId) ?? null;
+    const label = msg && msg.globalIndex != null ? `#${msg.globalIndex + 1}` : '';
+    const why = msg ? whyLines(msg, allMessages()) : [];
+    const respondedTo = respondedToOf(messageId, d.trigger?.user);
+    const turnSize = state.currentTurn?.messages.length ?? 0;
+    const navLabel = label ? `${label} · ${idx + 1} de ${turnSize} del turno` : '';
     el.innerHTML = `
       <button id="drawer-close" type="button" aria-label="Cerrar">✕</button>
+      <div class="drawer-nav">
+        <button id="drawer-prev" type="button" ${prev ? '' : 'disabled'}>◀ anterior</button>
+        <span class="drawer-nav-label">${escapeHtml(navLabel)}</span>
+        <button id="drawer-next" type="button" ${next ? '' : 'disabled'}>siguiente ▶</button>
+      </div>
       <h3>Mensaje</h3>
       <dl class="detail">
         <dt>Fecha</dt><dd>${fmtDate(d.timeCreated)}</dd>
@@ -410,9 +579,21 @@ async function openDrawer(messageId) {
           ? `<ul class="tools">${d.tools.map((t) => `<li>${escapeHtml(t.name)} <span>×${t.count}</span></li>`).join('')}</ul>`
           : '<p class="state">Sin tool calls.</p>'
       }
+      <h4>Disparador</h4>
+      ${triggerHtml(d.trigger, { respondedTo })}
       ${why.length ? `<h4>¿Por qué?</h4><ul class="why">${why.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>` : ''}
     `;
     $('drawer-close').addEventListener('click', closeDrawer);
+    if (prev) $('drawer-prev').addEventListener('click', () => openDrawer(prev.id));
+    if (next) $('drawer-next').addEventListener('click', () => openDrawer(next.id));
+    for (const btn of el.querySelectorAll('[data-open]')) {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.open;
+        const t = turnOfMessage(id);
+        if (t) openTurn(t);
+        openDrawer(id);
+      });
+    }
   } catch (err) {
     errorContent(el, err.message);
   }
@@ -420,6 +601,7 @@ async function openDrawer(messageId) {
 
 function closeDrawer() {
   const el = $('drawer');
+  state.openMessageId = null;
   el.classList.add('hidden');
   el.innerHTML = '';
 }
@@ -434,19 +616,35 @@ function renderBreadcrumb() {
   }
   if (state.sessionId) {
     const s = state.data.sessions?.items.find((i) => i.id === state.sessionId);
-    parts.push(`<span>${escapeHtml(s?.title || '(sin título)')}</span>`);
+    const title = escapeHtml(s?.title || '(sin título)');
+    parts.push(state.currentTurn ? `<button type="button" data-action="session">${title}</button>` : `<span>${title}</span>`);
+  }
+  if (state.currentTurn) {
+    parts.push(`<span>Turno ${state.currentTurn.index + 1}</span>`);
   }
   el.innerHTML = parts.join(' <span class="sep">/</span> ');
   el.querySelector('[data-action="root"]')?.addEventListener('click', gotoRoot);
   el.querySelector('[data-action="project"]')?.addEventListener('click', goToProjectLevel);
+  el.querySelector('[data-action="session"]')?.addEventListener('click', backToTurns);
+}
+
+function backToTurns() {
+  state.currentTurn = null;
+  closeDrawer();
+  resetTurn();
+  renderTurns();
+  renderBreadcrumb();
 }
 
 function goToProjectLevel() {
   state.sessionId = null;
-  state.data.messages = null;
-  const el = $('level-3');
-  el.classList.add('hidden');
-  el.innerHTML = '';
+  state.currentTurn = null;
+  state.data.turns = null;
+  for (const id of ['level-3', 'level-4']) {
+    const el = $(id);
+    el.classList.add('hidden');
+    el.innerHTML = '';
+  }
   closeDrawer();
   renderBreadcrumb();
 }
@@ -454,9 +652,10 @@ function goToProjectLevel() {
 function gotoRoot() {
   state.projectId = null;
   state.sessionId = null;
+  state.currentTurn = null;
   state.data.sessions = null;
-  state.data.messages = null;
-  for (const id of ['level-2', 'level-3']) {
+  state.data.turns = null;
+  for (const id of ['level-2', 'level-3', 'level-4']) {
     const el = $(id);
     el.classList.add('hidden');
     el.innerHTML = '';
@@ -468,9 +667,12 @@ function gotoRoot() {
 async function openProject(projectId) {
   state.projectId = projectId;
   state.sessionId = null;
-  state.data.messages = null;
-  $('level-3').classList.add('hidden');
-  $('level-3').innerHTML = '';
+  state.currentTurn = null;
+  state.data.turns = null;
+  for (const id of ['level-3', 'level-4']) {
+    $(id).classList.add('hidden');
+    $(id).innerHTML = '';
+  }
   closeDrawer();
   renderBreadcrumb();
   await loadSessions(projectId);
@@ -478,22 +680,27 @@ async function openProject(projectId) {
 
 async function openSession(sessionId) {
   state.sessionId = sessionId;
+  state.currentTurn = null;
+  resetTurn();
   closeDrawer();
   renderBreadcrumb();
-  await loadMessages(sessionId);
+  await loadTurns(sessionId);
 }
 
 /* ---------- refresco ---------- */
 async function refreshAll() {
   await loadProjects();
   if (state.projectId) await loadSessions(state.projectId);
-  if (state.sessionId) await loadMessages(state.sessionId);
+  if (state.sessionId) await loadTurns(state.sessionId);
 }
 
 function rerenderFromCache() {
   if (state.data.projects) renderProjects();
   if (state.data.sessions) renderSessions();
-  if (state.data.messages) renderMessages();
+  if (state.data.turns) {
+    renderTurns();
+    if (state.currentTurn) renderMessages();
+  }
 }
 
 /* ---------- eventos ---------- */
@@ -509,18 +716,35 @@ $('subagent-toggle').addEventListener('change', (e) => {
   state.groupByParent = e.target.checked;
   renderSessions();
 });
+$('exclude-models').addEventListener('change', (e) => {
+  state.excludeModels = Array.from(e.target.selectedOptions).map((o) => o.value);
+  refreshAll().catch((err) => showToast(err.message));
+});
 $('refresh').addEventListener('click', () => {
   loadQuota();
   refreshAll().catch((err) => showToast(err.message));
 });
 
 document.addEventListener('keydown', (e) => {
+  if (!$('drawer').classList.contains('hidden')) {
+    if (e.key === 'Escape') return closeDrawer();
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      const { prev, next } = messageSeq(state.openMessageId);
+      const target = e.key === 'ArrowLeft' ? prev : next;
+      if (target) {
+        e.preventDefault();
+        openDrawer(target.id);
+      }
+      return;
+    }
+  }
   if (e.key !== 'Escape') return;
-  if (!$('drawer').classList.contains('hidden')) return closeDrawer();
+  if (state.currentTurn) return backToTurns();
   if (state.sessionId) return goToProjectLevel();
   if (state.projectId) return gotoRoot();
 });
 
 /* ---------- init ---------- */
 loadQuota();
+loadModels().catch(() => {});
 refreshAll().catch((err) => showToast(err.message));

@@ -38,6 +38,10 @@
         <input type="checkbox" id="subagent-toggle" />
         Agrupar subagentes por padre
       </label>
+      <label>
+        Excluir modelos
+        <select id="exclude-models" multiple size="4"></select>
+      </label>
       <button id="refresh" type="button" title="Actualizar">⟳</button>
       <span id="legend">💸 modelo caro · 🚫 sin cache · 📤 output largo · 🧠 razonamiento alto · 🗜️ se compactó · 👥 muchos subagentes</span>
     </div>
@@ -47,7 +51,8 @@
     <main>
       <section id="level-1" class="level" aria-label="Proyectos"></section>
       <section id="level-2" class="level hidden" aria-label="Sesiones"></section>
-      <section id="level-3" class="level hidden" aria-label="Mensajes"></section>
+      <section id="level-3" class="level hidden" aria-label="Turnos"></section>
+      <section id="level-4" class="level hidden" aria-label="Mensajes del turno"></section>
     </main>
 
     <aside id="drawer" class="hidden" aria-label="Detalle del mensaje"></aside>

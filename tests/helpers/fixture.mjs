@@ -62,6 +62,69 @@ export function makeFixtureDb(filePath) {
   return { p1: 'p1', p2: 'p2', s1: 's1', s2: 's2', s3: 's3', m1: 'm1', m2: 'm2', m3: 'm3', m4: 'm4' };
 }
 
+function assistantWithParent({ time, parentID, input = 10, output = 5, reasoning = 0 }) {
+  return JSON.stringify({
+    parentID,
+    role: 'assistant',
+    cost: 0.001,
+    modelID: 'model-a',
+    providerID: 'prov-a',
+    agent: 'build',
+    time: { created: time, completed: time + 1000 },
+    tokens: { input, output, reasoning, total: input + output + reasoning, cache: { read: 0, write: 0 } },
+  });
+}
+
+/**
+ * Fixtures de "disparador" sobre un `makeFixtureDb` ya creado:
+ *   - s6 (v1): user u1 + assistants a1/a2 con `parentID = u1` (mismo turno).
+ *     El texto del prompt vive en el `part` type text de u1.
+ *   - s7 (v1): subagente de s6; a3 es su único assistant.
+ *   - a1 lleva el part del tool `task` que lanzó s7 (para el disparador cross-sesión).
+ */
+export function addTriggerFixtures(filePath) {
+  const db = new DatabaseSync(filePath);
+  const T6 = t(2026, 9, 1, 16);
+  const T7 = t(2026, 9, 1, 17);
+
+  const s = db.prepare(`INSERT INTO session_v2
+    (id, project_id, parent_id, title, directory, model, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, time_created, time_updated)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  s.run('s6', 'p1', null, 'Parent v1', '/home/u/proj-a', JSON.stringify({ id: 'model-a', providerID: 'prov-a' }), 0.02, 100, 20, 0, 0, 0, T6, T7);
+  s.run('s7', 'p1', 's6', 'Sub v1', '/home/u/proj-a', JSON.stringify({ id: 'model-a', providerID: 'prov-a' }), 0.01, 30, 5, 0, 0, 0, T7, T7);
+
+  const m = db.prepare('INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?,?,?,?,?)');
+  m.run('u1', 's6', T6, T6, JSON.stringify({ role: 'user', time: { created: T6 } }));
+  m.run('a1', 's6', T6 + 1000, T6 + 1000, assistantWithParent({ time: T6 + 1000, parentID: 'u1' }));
+  m.run('a2', 's6', T6 + 2000, T6 + 2000, assistantWithParent({ time: T6 + 2000, parentID: 'u1', input: 20 }));
+  m.run('a3', 's7', T7, T7, tokensData({ time: T7, input: 30, output: 5, reasoning: 0 }));
+
+  const pt = db.prepare('INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?,?,?,?,?,?)');
+  pt.run('pt_text', 'u1', 's6', T6, T6, JSON.stringify({ type: 'text', text: '¿Qué es un MCP?' }));
+  pt.run('pt_a1_text', 'a1', 's6', T6 + 1000, T6 + 1000, JSON.stringify({ type: 'text', text: 'Un MCP es un protocolo de contexto.' }));
+  pt.run('pt_a2_text', 'a2', 's6', T6 + 2000, T6 + 2000, JSON.stringify({ type: 'text', text: 'x'.repeat(400) }));
+  pt.run(
+    'pt_task',
+    'a1',
+    's6',
+    T6 + 1000,
+    T6 + 1000,
+    JSON.stringify({
+      type: 'tool',
+      tool: 'task',
+      callID: 'ct1',
+      state: {
+        status: 'completed',
+        input: { description: 'Fix X', prompt: 'Hacé esto', subagent_type: 'general' },
+        output: '<task id="s7" state="completed"><task_result>ok</task_result></task>',
+      },
+    }),
+  );
+
+  db.close();
+  return { s6: 's6', s7: 's7', u1: 'u1', a1: 'a1', a2: 'a2', a3: 'a3' };
+}
+
 /**
  * Sesión "v2-only" (sin filas en `message`): sus mensajes viven en
  * `session_message` con el shape de OpenCode v2, parcialmente podados.
@@ -111,6 +174,7 @@ export function addSessionMessageFixtures(filePath) {
       cost: 0.01,
       time: { created: T5 + 2000, completed: T5 + 3000 },
       tokens: { input: 20, output: 3, reasoning: 0, cache: { read: 0, write: 0 } },
+      content: [{ type: 'text', text: 'Respuesta v2 a hola' }],
     }),
   );
 

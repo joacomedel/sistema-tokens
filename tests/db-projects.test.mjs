@@ -72,6 +72,25 @@ test('openDb tira error claro si la BD no existe', () => {
   assert.throws(() => openDb(join(dir, 'no-existe.db')), /BD no encontrada/);
 });
 
+test('listProjects con excludeModels filtra sesiones por modelo', () => {
+  const { items, totals } = listProjects(db, { ...range, excludeModels: ['model-a'] });
+  assert.equal(items.length, 1, 'solo p2 tiene sesiones con model-b');
+  const p2 = items.find((i) => i.id === ids.p2);
+  assert.equal(p2.metrics.effective, 15);
+  assert.equal(totals.effective, 15);
+});
+
+test('listProjects con excludeModels múltiples', () => {
+  const { items, totals } = listProjects(db, { ...range, excludeModels: ['model-a', 'model-b'] });
+  assert.equal(items.length, 0);
+  assert.equal(totals.effective, 0);
+});
+
+test('listSessions con excludeModels filtra por modelo', () => {
+  const { items } = listSessions(db, { projectId: ids.p1, ...range, excludeModels: ['model-a'] });
+  assert.equal(items.length, 0, 'todas las sesiones de p1 usan model-a');
+});
+
 test('los agregados salen de session_v2 aunque los mensajes difieran', () => {
   const dir2 = mkdtempSync(join(tmpdir(), 'sistema-tokens-'));
   const path = join(dir2, 'fixture.db');

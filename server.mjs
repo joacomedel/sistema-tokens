@@ -3,7 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { openDb, listProjects, listSessions, listMessages, getMessageDetail, getSessionTotals, childCounts } from './lib/db.mjs';
+import { openDb, listProjects, listSessions, listMessages, listTurns, getMessageDetail, getSessionTotals, childCounts, listAllModels } from './lib/db.mjs';
 import { resolveRange, RANGES } from './lib/ranges.mjs';
 import { annotateMessages, annotateSessions } from './lib/causes.mjs';
 import { getQuota } from './lib/quota.mjs';
@@ -35,6 +35,20 @@ function sumMetrics(list) {
   }
   acc.cost = round6(acc.cost);
   return acc;
+}
+
+/**
+ * Solo es "poda" si el rango cubre la vida completa de la sesión; si no, la
+ * diferencia entre lo visible y el total autoritativo se explica por el rango.
+ */
+function sessionCoverage(database, sessionId, range, totals) {
+  const sessionTotals = getSessionTotals(database, sessionId);
+  const coversSession =
+    sessionTotals != null &&
+    (range.fromMs == null || range.fromMs <= sessionTotals.timeCreated) &&
+    (range.toMs == null || range.toMs >= sessionTotals.timeUpdated);
+  const partial = Boolean(coversSession && totals.effective < sessionTotals.effective);
+  return { sessionTotals, partial };
 }
 
 function sendJson(res, status, body) {
@@ -134,6 +148,13 @@ export function createServer({ dbPath = null, config = {}, quotaFetcher = null, 
       });
     }
 
+    if (resource === 'models' && !id) {
+      return withDb(res, (database) => {
+        const models = listAllModels(database);
+        sendJson(res, 200, { models });
+      });
+    }
+
     if (resource === 'quota' && !id) {
       const quota = await currentQuota(url.searchParams.get('refresh') === '1');
       return sendJson(res, 200, quota);
@@ -142,9 +163,10 @@ export function createServer({ dbPath = null, config = {}, quotaFetcher = null, 
     if (resource === 'projects' && !id) {
       const range = parseRange(url, res);
       if (!range) return;
+      const excludeModels = url.searchParams.getAll('excludeModels');
       return withDb(res, (database) => {
-        const { items, totals } = listProjects(database, range);
-        const sessions = listSessions(database, { ...range });
+        const { items, totals } = listProjects(database, { ...range, excludeModels });
+        const sessions = listSessions(database, { ...range, excludeModels });
         annotateSessions(sessions.items, { childCounts: childCounts(database) });
         const byProject = new Map();
         for (const s of sessions.items) {
@@ -160,8 +182,9 @@ export function createServer({ dbPath = null, config = {}, quotaFetcher = null, 
     if (resource === 'projects' && id && sub === 'sessions') {
       const range = parseRange(url, res);
       if (!range) return;
+      const excludeModels = url.searchParams.getAll('excludeModels');
       return withDb(res, (database) => {
-        const { items, totals } = listSessions(database, { projectId: id, ...range });
+        const { items, totals } = listSessions(database, { projectId: id, ...range, excludeModels });
         annotateSessions(items, { childCounts: childCounts(database) });
         sendJson(res, 200, { range: range.key, items, totals });
       });
@@ -170,19 +193,27 @@ export function createServer({ dbPath = null, config = {}, quotaFetcher = null, 
     if (resource === 'sessions' && id && sub === 'messages') {
       const range = parseRange(url, res);
       if (!range) return;
+      const excludeModels = url.searchParams.getAll('excludeModels');
       return withDb(res, (database) => {
-        const { items, skipped, source } = listMessages(database, id, range);
+        const { items, skipped, source } = listMessages(database, id, { ...range, excludeModels });
         annotateMessages(items);
         const totals = sumMetrics(items.map((i) => i.tokens));
-        const sessionTotals = getSessionTotals(database, id);
-        // Solo es "poda" si el rango cubre la vida completa de la sesión; si no,
-        // la diferencia se explica por el recorte del rango.
-        const coversSession =
-          sessionTotals != null &&
-          (range.fromMs == null || range.fromMs <= sessionTotals.timeCreated) &&
-          (range.toMs == null || range.toMs >= sessionTotals.timeUpdated);
-        const partial = Boolean(coversSession && totals.effective < sessionTotals.effective);
+        const { sessionTotals, partial } = sessionCoverage(database, id, range, totals);
         sendJson(res, 200, { range: range.key, items, skipped, totals, sessionTotals, partial, source });
+      });
+    }
+
+    if (resource === 'sessions' && id && sub === 'turns') {
+      const range = parseRange(url, res);
+      if (!range) return;
+      const excludeModels = url.searchParams.getAll('excludeModels');
+      return withDb(res, (database) => {
+        const { turns, skipped, source } = listTurns(database, id, { ...range, excludeModels });
+        const items = turns.flatMap((t) => t.messages);
+        annotateMessages(items); // flags sobre el set completo de la sesión
+        const totals = sumMetrics(items.map((i) => i.tokens));
+        const { sessionTotals, partial } = sessionCoverage(database, id, range, totals);
+        sendJson(res, 200, { range: range.key, turns, skipped, totals, sessionTotals, partial, source });
       });
     }
 
