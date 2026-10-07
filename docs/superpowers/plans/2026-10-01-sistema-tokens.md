@@ -1,5 +1,7 @@
 # sistemaTokens — Implementation Plan
 
+> **Estado (2026-10-01): ejecutado.** Desviaciones respecto de este plan: barras CSS en lugar de μPlot (Task 7) y totales desde `session_v2` tras descubrir la poda de mensajes de OpenCode (Task 8). Ver la spec actualizada y el ledger SDD.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** App web local (Node 24 puro) que lee la BD SQLite de OpenCode en solo-lectura y permite navegar proyecto → sesión → mensaje con barras, señales de causa y panel de cuota.
@@ -284,7 +286,7 @@ git commit -m "feat: http api server"
 
 ---
 
-### Task 7: Frontend — drill-down con μPlot
+### Task 7: Frontend — drill-down de barras (ejecutado con CSS, no μPlot)
 
 **Files:**
 - Create: `public/index.html`, `public/app.js`, `public/styles.css`, `public/vendor/` (descargados)

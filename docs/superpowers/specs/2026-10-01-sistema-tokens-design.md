@@ -40,22 +40,24 @@ App web local y liviana que lee la base de datos de OpenCode (SQLite) y visualiz
 |---|---|
 | `project` | `id`, `worktree` (carpeta raíz), `name` (habitualmente `null`) |
 | `session_v2` | `id`, `project_id`, `parent_id` (subagentes), `title`, `directory`, `model` (JSON string: `{"id","providerID","variant"}`), `cost`, `tokens_input`, `tokens_output`, `tokens_reasoning`, `tokens_cache_read`, `tokens_cache_write`, `time_created`, `time_updated`, `time_compacting`, `time_archived` |
-| `message` | `id`, `session_id`, `time_created`, `data` (JSON) |
+| `message` | **Legacy v1.** `id`, `session_id`, `time_created`, `data` (JSON plano: `role`, `modelID`, `providerID`, `tokens`) |
+| `session_message` | **Viva en v2.** `id`, `session_id`, `type` (`user`/`assistant`/otros), `seq`, `time_created`, `data` (JSON v2: `model {id, providerID}` anidado) |
 | `part` | `id`, `message_id`, `session_id`, `data` (JSON) |
 | `account` | `access_token`, `token_expiry` (fallback de cuota) |
 | `credential` | `value` (API key del provider, `integration_id = 'opencode'`) |
 
 ### JSON internos (verificados)
 
-- `message.data` (assistant): `role`, `cost`, `tokens {input, output, reasoning, cache {read, write}, total}`, `modelID`, `providerID`, `variant`, `agent`, `time {created, completed}` (epoch ms).
+- `message.data` (assistant, v1): `role`, `cost`, `tokens {input, output, reasoning, cache {read, write}, total}`, `modelID`, `providerID`, `variant`, `agent`, `time {created, completed}` (epoch ms).
+- `session_message.data` (assistant, v2): `agent`, `model {id, providerID, variant}`, `cost`, `tokens {input, output, reasoning, cache {read, write}}` (sin `total`), `time {created, completed}`. La columna `type` separa user/assistant.
 - `part.data`: `type` ∈ {`text`, `reasoning`, `tool`, `step-start`, `step-finish`}. Un `tool` trae `callID`, `tool` (nombre), `state`.
-- **Consistencia verificada:** la suma de tokens/costo de los mensajes de una sesión coincide **exactamente** con los agregados de `session_v2` (comprobado en las sesiones más grandes).
+- **Fuente de verdad (actualizado 2026-10-01 tras la verificación):** los agregados de `session_v2` son **autoritativos**. `message` (v1) es completa para las sesiones históricas; `session_message` (v2) cubre todas las sesiones nuevas pero **OpenCode poda sus mensajes viejos** (huecos visibles en `seq`), así que su suma puede ser menor al total de la sesión. Verificado con `scripts/verify.mjs`: sesiones v1 cuadran exacto, v2 nunca exceden su total.
 - Subagentes: 50 de 142 sesiones tienen `parent_id`.
 - Un proyecto con worktree `/` (sesiones globales) se muestra como **"Global"**.
 
 ## 4. Arquitectura
 
-**Stack:** Node 24 puro — `node:sqlite`, `node:http` y `fetch` nativos. Frontend HTML/CSS/JS vanilla con **μPlot** (gráficos, ~45 KB) servido local. **Cero dependencias npm, cero build step, cero CDN.**
+**Stack:** Node 24 puro — `node:sqlite`, `node:http` y `fetch` nativos. Frontend HTML/CSS/JS vanilla con barras horizontales CSS (sin librería de gráficos). **Cero dependencias npm, cero build step, cero CDN.**
 
 ```
 sistemaTokens/
@@ -69,8 +71,7 @@ sistemaTokens/
 ├── public/
 │   ├── index.html
 │   ├── app.js             # estado, fetch, render de barras, drill-down, drawer
-│   ├── styles.css
-│   └── vendor/            # uPlot.iife.min.js + uPlot.min.css (descargados una vez)
+│   └── styles.css
 ├── config.json            # puerto, dbPath, límites manuales de cuota, TTL de caché
 ├── tests/                 # tests con node:test + BD fixture
 ├── scripts/verify.mjs     # verificación cruzada contra la BD real (readonly)
@@ -86,10 +87,10 @@ sistemaTokens/
 ## 5. Queries y modelo de cálculo
 
 - **Filtro de rango:** por `message.time_created` (epoch ms). Rangos: `today`, `7d`, `30d`, `month` (mes calendario, desde el día 1) y `all`. **Default: `30d`.** Timezone local del sistema.
-- **Niveles 1 y 2** se calculan sumando los mensajes assistant del rango (precisión temporal real, verificada idéntica a los agregados de sesión). Con estos volúmenes (2.2k mensajes) el costo es imperceptible.
+- **Niveles 1 y 2** usan las columnas agregadas de `session_v2` (cobertura completa, incluso con mensajes podados). El rango temporal se aplica por solapamiento: sesiones con `time_created <= to` y `time_updated >= from`.
 - **Nivel 1 — Proyectos:** `GROUP BY project_id`; label = `name ?? basename(worktree)`; worktree `/` → "Global".
 - **Nivel 2 — Sesiones:** `GROUP BY session_id` dentro del proyecto; incluye subagentes con su `parent_id`, `title`, `model`, `time_compacting`.
-- **Nivel 3 — Mensajes:** mensajes assistant de la sesión, con `modelID/providerID/variant`, duración (`completed - created`) y conteo de tools por nombre.
+- **Nivel 3 — Mensajes:** mensajes assistant de la sesión desde su fuente correspondiente (`message` si la sesión es histórica; `session_message` si es de v2), con modelo/variante, duración y conteo de tools por nombre. Las barras se ordenan por la métrica elegida (descendente) y muestran el desglose (`in`/`out`/`🧠`/`cache`) en la propia barra; el `#N` conserva el orden cronológico como referencia. Si el total visible es menor al de `session_v2`, la UI lo avisa (poda de OpenCode).
 - **Detalle:** desglose completo del mensaje + tools agrupadas por nombre con conteo (sin contenido de los textos).
 - **Tokens efectivos = `input + output + reasoning`** (≈ `total − cache_read − cache_write`). Métrica de orden/color por defecto. El cache-read/write se muestra aparte para no distorsionar.
 - **USD:** el `cost` que OpenCode ya registró (modelos gratuitos = USD 0 legítimo; no se inventan precios).
@@ -131,7 +132,7 @@ sistemaTokens/
 1. Intento API con credenciales locales en orden: `credential` (provider) → `account` (OAuth).
 2. Parseo **tolerante** del shape conocido: `usage.{rolling, weekly, monthly}` → `{ percent | percentage, resetsAt | resetAt | reset_at (ISO o epoch-ms) }`. Sin datos → no se inventa nada.
 3. Caché de 60 s (configurable) + reintento periódico + botón "reintentar" en la UI.
-4. **Fallback local:** si la API falla, el panel muestra el uso local por ventana (5 h móviles; semana calendario ISO; mes calendario) en USD y tokens, calculado de la BD. Si `config.json` define `quota.manualLimits` (USD), muestra además el % consumido. La UI distingue siempre **"oficial (API)"** de **"calculado local"** con la causa del fallback (`401`, red, etc.).
+4. **Fallback local:** si la API falla, el panel muestra el uso local por ventana (5 h móviles; semana calendario ISO; mes calendario) en USD y tokens, calculado como suma de costo de las **sesiones activas en la ventana** (`session_v2.time_updated`). Si `config.json` define `quota.manualLimits` (USD), muestra además el % consumido. La UI distingue siempre **"oficial (API)"** de **"calculado local"** con la causa del fallback (`401`, red, etc.).
 
 **Seguridad:** los tokens nunca se loguean, nunca viajan al frontend y nunca se persisten fuera de la BD. Toda comparación es server-side.
 
@@ -156,7 +157,7 @@ sistemaTokens/
 - **Subagentes:** borde punteado + color secundario + toggle "agrupar por padre".
 - **Señales:** ícono + color por barra, tooltip explicativo, leyenda fija.
 - **Estados:** cargando (skeleton), vacío ("sin datos en este rango") y error, cada uno con mensaje claro.
-- **Drawer de mensaje:** timestamp, modelo/variante, agente, desglose de tokens, costo, duración, resumen de tools.
+- **Drawer de mensaje:** timestamp, modelo/variante, agente, desglose de tokens, costo, duración, resumen de tools y una sección **¿Por qué?** que explica el consumo (comparación con la mediana de la sesión, composición de tokens, uso de cache y señales).
 
 ## 10. Errores y degradación
 
@@ -170,7 +171,7 @@ sistemaTokens/
 ## 11. Testing y validación
 
 - **Unit tests** (`node:test`, sin dependencias): `db.mjs` (agregaciones de los 3 niveles, filtros, nombres), `causes.mjs` (percentiles, cada señal), `quota.mjs` (parseo tolerante con respuestas mockeadas, fallback), `ranges.mjs`. Fixture: BD SQLite temporal con esquema mínimo y datos sintéticos.
-- **`scripts/verify.mjs`:** contra la BD real (readonly) comprueba que suma de mensajes = agregados de `session_v2` para todas las sesiones e imprime discrepancias.
+- **`scripts/verify.mjs`:** contra la BD real (readonly) comprueba que las sesiones v1 cuadran exacto con `session_v2` y que lo visible de las v2 no excede su total; la poda se reporta como información (`parciales por poda`), no como error.
 - **Verificación cruzada en runtime:** nivel 1 = Σ nivel 2 = Σ nivel 3 para el mismo rango.
 - **UI:** prueba manual con Playwright (click → nivel 2 → nivel 3 → drawer; probar rangos y métricas; estados de error).
 - **Rendimiento esperado:** respuestas < 100 ms con los datos actuales; si creciera mucho, top-N barras + "otros".
@@ -179,7 +180,7 @@ sistemaTokens/
 1. Drill-down completo en 3 niveles por click, con breadcrumb y `Esc`.
 2. Señales y outliers visibles y correctos según los umbrales definidos.
 3. Panel de cuota mostrando datos oficiales o fallback local claramente etiquetado.
-4. Los tres niveles cuadran entre sí para cualquier rango.
+4. Niveles 1-2 cuadran entre sí (misma fuente `session_v2`); el nivel 3 cuadra exacto en sesiones v1 y puede ser parcial por poda en v2, siempre avisado en la UI.
 5. La BD de OpenCode no se modifica: la app la abre en modo readonly y no ejecuta ninguna sentencia de escritura (verificable por diseño y en revisión de código).
 6. Ninguna dependencia npm; arranca con `npm start` (o `node server.mjs`) y abre en `http://localhost:4747`.
 
@@ -196,7 +197,7 @@ sistemaTokens/
 ## 13. Decisiones de diseño (y alternativas descartadas)
 
 - **Node 24 puro (elegida)** vs. Vite+React (peso y build step innecesarios) vs. Python (dos lenguajes sin ganancia). Sin dependencias = no se rompe por versiones.
-- **μPlot** (45 KB, sin dependencias, muy rápido) vs. Chart.js/ECharts (más peso).
+- **Barras horizontales en CSS** (decidido durante la implementación; el plan preveía μPlot): mejor lectura para rankings con labels largos, flags y click directo, y refuerza el cero-dependencias. El render está aislado en `renderBars()` por si se migra.
 - **Sin `ccusage`:** sus adaptadores leen los JSON legacy; la v2 es SQLite y además necesitamos drill-down por mensaje con señales, que ninguna herramienta da.
 - **USD real de OpenCode**, sin tabla de precios propia (YAGNI hoy).
 - **Cuota por API con fallback manual**, porque el endpoint rechazó las credenciales locales en el spike pero puede habilitarse solo (reintentos automáticos ya previstos).

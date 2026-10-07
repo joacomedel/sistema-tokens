@@ -1,0 +1,15 @@
+{
+  "name": "sistema-tokens",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Visualizador local de consumo de tokens de OpenCode",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.mjs",
+    "test": "node --disable-warning=ExperimentalWarning --test \"tests/**/*.test.mjs\"",
+    "verify": "node --disable-warning=ExperimentalWarning scripts/verify.mjs",
+    "mcp": "node --disable-warning=ExperimentalWarning mcp/index.mjs",
+    "install:mcp": "npm --prefix mcp install",
+    "test:mcp": "npm --prefix mcp test"
+  }
+}
